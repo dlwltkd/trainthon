@@ -82,6 +82,31 @@ function assertFinal(record: Awaited<ReturnType<typeof executeRepositoryReview>>
 describe("prompt-driven source review", () => {
   const reviewModel = { provider: "compatible" as const, model: "review-test", baseURL: "https://api.routeway.ai/v1" };
 
+  it("saves independently supported before/after suggestions without applying a patch", async () => {
+    const f = fixture();
+    const record = await executeRepositoryReview({ ...f.options, includeCodeSuggestions: true, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => {
+        expect(tools.suggest_code_change).toBeUndefined();
+        await startReview(tools);
+        await tools.report_finding!(finding);
+        return "The addition function uses subtraction.";
+      }),
+      runner: new ScriptedRunner(async tools => {
+        await startReview(tools);
+        await tools.report_finding!({ ...finding, id: "blue-addition" });
+        await tools.assess_finding!({ findingId: "addition", verdict: "confirmed", blueFindingId: "blue-addition", evidence: ["src/add.ts"], summary: "Independently read the subtraction expression." });
+        await tools.suggest_code_change!({ findingId: "blue-addition", path: "src/add.ts", oldText: original, newText: corrected, explanation: "덧셈 함수가 두 수를 더하도록 수정합니다." });
+        return "소스에서 확인한 동작에 대한 수정 제안입니다.";
+      }),
+    });
+    expect(record.status).toBe("REVIEW_COMPLETE");
+    expect(record.codeSuggestions).toEqual([{ findingId: "blue-addition", path: "src/add.ts", oldText: original, newText: corrected, explanation: "덧셈 함수가 두 수를 더하도록 수정합니다.", startLine: 1, endLine: 1 }]);
+    expect(record.changes.files).toEqual([]);
+    expect(readFileSync(record.artifacts.patch, "utf8")).toBe("");
+    expect(readFileSync(join(f.repoPath, "src/add.ts"), "utf8")).toBe(original);
+    assertFinal(record, f);
+  });
+
   it.each([false, true])("requires correction and fresh diff inspection after a Python syntax error (corrected=%s)", async correctedSyntax => {
     const f = fixture();
     writeFileSync(join(f.repoPath, "policy.py"), "def add(a, b):\n    return a - b\n");

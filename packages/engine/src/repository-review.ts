@@ -16,6 +16,7 @@ export interface ExecuteRepositoryReviewOptions {
   prompt: string;
   report?: string;
   remediate?: boolean;
+  includeCodeSuggestions?: boolean;
   runsDir: string;
   workspacesDir?: string;
   model: ModelSpec;
@@ -54,7 +55,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   const startedAt = Date.now();
   let configHash = "invalid-config";
   let configError: unknown;
-  try { configHash = hash(JSON.stringify({ workflow, repo: options.repoPath, ref: options.ref ?? "HEAD", prompt: options.prompt, report: options.report ?? "", model: canonicalizeModelSpec(options.model), ...(options.reviewModel ? { reviewModel: canonicalizeModelSpec(options.reviewModel) } : {}), budgets: options.budgets, requestPolicy: REQUEST_POLICY, sourceContextPolicy: SOURCE_CONTEXT_POLICY, assessmentPolicy: ASSESSMENT_POLICY, seed: options.seed })); }
+  try { configHash = hash(JSON.stringify({ workflow, repo: options.repoPath, ref: options.ref ?? "HEAD", prompt: options.prompt, report: options.report ?? "", model: canonicalizeModelSpec(options.model), ...(options.reviewModel ? { reviewModel: canonicalizeModelSpec(options.reviewModel) } : {}), budgets: options.budgets, requestPolicy: REQUEST_POLICY, sourceContextPolicy: SOURCE_CONTEXT_POLICY, assessmentPolicy: ASSESSMENT_POLICY, ...(options.includeCodeSuggestions ? { codeSuggestionPolicy: "exact-source-v1" } : {}), seed: options.seed })); }
   catch (error) { configError = error; }
   logger.emit({ type: "run_start", runKind: "local_repository", workflow, configHash, mode: "live", model: options.model.model, seed: options.seed, budgets: options.budgets });
   let budget: RunBudget | undefined;
@@ -160,13 +161,13 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     budget.check();
     logger.emit({ type: "guidance_configured", ...(options.remediate ? SOURCE_REPAIR_GUIDANCE : REPOSITORY_REVIEW_GUIDANCE), agentRole: "blue" });
     logger.emit({ type: "role_assigned", role: "blue", runner: options.remediate ? "source-remediation" : "source-review", provider: options.model.provider, model: options.model.model });
-    toolset = buildSourceReviewTools(workspace, budget.signal, emitAgentEvent, options.remediate, "blue", reviewToolset?.findings().map(finding => finding.findingId));
+    toolset = buildSourceReviewTools(workspace, budget.signal, emitAgentEvent, options.remediate, "blue", reviewToolset?.findings().map(finding => finding.findingId), options.includeCodeSuggestions);
     const repairContext = supplyContext(toolset, "blue");
     status = "INFRA_ERROR";
     budget.check(); invoked = true;
     const result = await runner.run({
       system: options.remediate ? systemPromptRepositoryRepair() : systemPromptRepositoryReview(),
-      prompt: prompt + repairContext.text + handoff, initialSourceFiles: repairContext.files.map(file => file.path),
+      prompt: prompt + repairContext.text + handoff + (options.includeCodeSuggestions && !options.remediate ? "\n\n## Code suggestions\nBefore your final summary, call suggest_code_change for each confirmed finding where a concrete defensive correction is supported by the source you read. Use short, exact source excerpts and complete replacements with necessary imports, without invented helper APIs or exploit examples. Prefer one focused suggestion per finding. Write explanations in Korean. These proposals are displayed separately below your summary; do not duplicate code in the summary. If a code change needs missing context, explain what the owner must check in your recommendation instead of inventing a fix. Proposals are not applied or tested." : ""), initialSourceFiles: repairContext.files.map(file => file.path),
       tools: toolset.tools, budgets: options.budgets, budget, model: options.model.model, seed: options.seed, role: "blue", stage, requestPolicy: REQUEST_POLICY,
       onEvent: emitAgentEvent,
     });
@@ -227,6 +228,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     repository: { name: source?.name ?? basename(options.repoPath), url: source?.url, requestedRef: options.ref ?? "HEAD", commit: workspace?.commit ?? null, files: workspace?.files.length ?? 0 },
     model: options.model, ...(options.reviewModel ? { reviewModel: options.reviewModel, reviewSummary, ...(reviewStatus ? { reviewStatus } : {}), ...(reviewFailure ? { reviewFailure } : {}) } : {}), verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged },
     findings: [...recordedFindings.values()], assessments: toolset?.assessments() ?? [], unassessedFindingIds: toolset?.unassessedFindingIds() ?? reviewToolset?.findings().map(finding => finding.findingId) ?? [], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },
+    codeSuggestions: toolset?.codeSuggestions() ?? [],
     ...(delivery ? { delivery } : {}), artifacts,
   };
   writeJson(artifacts.record, record);

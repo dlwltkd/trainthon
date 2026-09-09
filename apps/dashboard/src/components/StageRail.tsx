@@ -1,6 +1,6 @@
 import { Check, Minus } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { STAGE_HINT, STAGE_LABEL, isRepositoryReview, isRepositoryRemediation, type RunView, type StageView } from "@/lib/derive";
+import { STAGE_HINT, STAGE_LABEL, isExternalAssessment, isRepositoryReview, isRepositoryRemediation, type RunView, type StageView } from "@/lib/derive";
 import { formatDuration } from "@/lib/format";
 
 /**
@@ -8,7 +8,7 @@ import { formatDuration } from "@/lib/format";
  * which gate decided each transition. Nothing here is inferred — it is driven by state_change/gate events.
  */
 export function StageRail({ view, now }: { view: RunView; now: number }) {
-  const order = isRepositoryRemediation(view) ? ["CONTEXT", "REVIEW", "PATCH", "DONE"] : isRepositoryReview(view) ? ["CONTEXT", "REVIEW", "DONE"] : view.stages.filter((stage) => stage.id !== "INIT").map((stage) => stage.id);
+  const order = isRepositoryRemediation(view) ? ["CONTEXT", "REVIEW", "PATCH", "DONE"] : isRepositoryReview(view) || isExternalAssessment(view) ? ["CONTEXT", "REVIEW", "DONE"] : view.stages.filter((stage) => stage.id !== "INIT").map((stage) => stage.id);
   const visible = order.map((id) => view.stages.find((stage) => stage.id === id)).filter((stage): stage is StageView => stage !== undefined);
   return (
     <div className="border-b border-line bg-panel px-4 py-2.5">
@@ -25,11 +25,16 @@ function Stage({ stage, view, now, last }: { stage: StageView; view: RunView; no
   const active = stage.status === "active";
   const done = stage.status === "done";
   const skipped = stage.status === "skipped";
+  const external = isExternalAssessment(view);
+  const externalLive = external && view.mode === "live";
   const sourceWorkflow = isRepositoryReview(view) || isRepositoryRemediation(view);
-  const hint = sourceWorkflow ? stage.id === "CONTEXT" ? "Snapshot the requested repository" : stage.id === "REVIEW" ? "Inspect source and report findings" : stage.id === "PATCH" ? "Propose source changes · no tests" : "Recorded outcome" : view.kind === "local_repository" && stage.id === "REPRODUCE" ? "Check the supplied regression" : view.kind === "local_repository" && stage.id === "REVIEW" ? "Review the test evidence" : STAGE_HINT[stage.id];
+  const hint = external
+    ? stage.id === "CONTEXT" ? externalLive ? "실제 API 응답을 순서대로 비식별 판정" : "운영자 제공 비식별 근거 불러오기" : stage.id === "REVIEW" ? "Blue 근거 검증 및 제보 초안 작성" : "제보 패키지 준비 완료"
+    : sourceWorkflow ? stage.id === "CONTEXT" ? "Snapshot the requested repository" : stage.id === "REVIEW" ? "Inspect source and report findings" : stage.id === "PATCH" ? "Propose source changes · no tests" : "Recorded outcome" : view.kind === "local_repository" && stage.id === "REPRODUCE" ? "Check the supplied regression" : view.kind === "local_repository" && stage.id === "REVIEW" ? "Review the test evidence" : STAGE_HINT[stage.id];
   const duration = active && stage.enteredAt !== undefined ? Math.max(0, (view.endedAt ?? now) - stage.enteredAt) : stage.durationMs;
   const gate = stage.id === "REPRODUCE" ? view.gates.reproduce : stage.id === "VERIFY" ? view.gates.verify : undefined;
   const gateTone = gate ? (gate.phase === "reproduce" ? (gate.reproduced ? "pass" : "info") : gate.passed ? "pass" : "fail") : undefined;
+  const label = external ? stage.id === "CONTEXT" ? externalLive ? "Red 실시간 탐색" : "근거 준비" : stage.id === "REVIEW" ? "Blue 검토·대응" : "완료" : STAGE_LABEL[stage.id];
 
   return (
     <li className={cn("flex min-w-[8.5rem] flex-1 items-start gap-2", !last && "pr-1")}>
@@ -49,7 +54,7 @@ function Stage({ stage, view, now, last }: { stage: StageView; view: RunView; no
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className={cn("text-[0.9em] font-semibold tracking-tight", active ? "text-info" : done ? "text-ink" : "text-ink-3")}>{STAGE_LABEL[stage.id]}</span>
+          <span className={cn("text-[0.9em] font-semibold tracking-tight", active ? "text-info" : done ? "text-ink" : "text-ink-3")}>{label}</span>
           {duration !== undefined && stage.id !== "DONE" && <span className="font-mono text-[0.75em] tabular-nums text-ink-3">{formatDuration(duration)}</span>}
         </div>
         <div className="secondary truncate text-[0.78em] text-ink-3">{hint}</div>

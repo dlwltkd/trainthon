@@ -4,7 +4,12 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), {
+    name: "audience-entry",
+    transformIndexHtml: html => process.env.VOUCH_PUBLIC_DEMO === "1"
+      ? html.replace('<html lang="en">', '<html lang="ko" data-audience="true">')
+      : html,
+  }],
   resolve: {
     alias: {
       "@vouch/protocol": fileURLToPath(new URL("../../packages/protocol/src/index.ts", import.meta.url)),

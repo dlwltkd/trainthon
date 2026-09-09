@@ -2,8 +2,12 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+.playwright-mcp/
+.vercel/
 runs/
 .worktrees/
 .env
 .env.*
 !.env.example
+.vercel
+.env*

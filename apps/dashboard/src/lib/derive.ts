@@ -243,7 +243,7 @@ export interface RunView {
   runId: string;
   kind: "benchmark" | "local_repository";
   mode?: string;
-  workflow?: "repository_review" | "repository_repair" | "repository_remediation";
+  workflow?: "repository_review" | "repository_repair" | "repository_remediation" | "external_assessment";
   condition?: string;
   taskId?: string;
   status: RunStatus;
@@ -281,7 +281,7 @@ export interface RunView {
   eventCount: number;
 }
 
-const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "search", "run_repro", "run_tests", "run_regression", "run_functional_tests", "use_skill", "report_progress"]);
+const READ_ONLY_TOOLS = new Set(["read_file", "list_dir", "grep", "search", "live_http_request", "classify_http_response", "decode_jwt_metadata", "run_repro", "run_tests", "run_regression", "run_functional_tests", "use_skill", "report_progress"]);
 const EXPLORE_TOOLS = new Set(["read_file", "list_dir", "grep", "search"]);
 
 export function isExploreTool(name: string): boolean {
@@ -295,7 +295,7 @@ function argString(args: unknown, key: string): string | undefined {
 }
 
 export function toolTarget(name: string, args: unknown): string | undefined {
-  return argString(args, "path") ?? argString(args, "file") ?? argString(args, "pattern") ?? argString(args, "query") ?? argString(args, "cmd") ?? argString(args, "command");
+  return argString(args, "path") ?? argString(args, "url") ?? argString(args, "file") ?? argString(args, "pattern") ?? argString(args, "query") ?? argString(args, "cmd") ?? argString(args, "command");
 }
 
 export function fallbackSummary(name: string, args: unknown): string {
@@ -329,6 +329,14 @@ export function fallbackSummary(name: string, args: unknown): string {
     }
     case "report_progress":
       return "Publishing plan and decision summary";
+    case "live_http_request":
+      return target ? `실시간 요청 · ${target}` : "실시간 API 요청";
+    case "classify_http_response":
+      return target ? `값 없는 응답 판정 · ${target}` : "값 없는 응답 판정";
+    case "decode_jwt_metadata":
+      return "토큰 값 없이 JWT 메타데이터 계산";
+    case "write_disclosure_package":
+      return "비식별 관찰과 제보 패키지 작성";
     default:
       return `Running ${name}`;
   }
@@ -855,7 +863,11 @@ export function statusDescription(view: RunView): string {
     case "PATCH_PROPOSED":
       return "A source patch was proposed from code inspection. Tests were not run. Review the diff and findings before delivery.";
     case "REVIEW_COMPLETE":
-      return "Read-only source review completed. Findings describe the inspected code; tests were not run.";
+      return isExternalAssessment(view)
+        ? view.mode === "live"
+          ? "실제 API 응답을 비식별 판정했습니다. 응답 원문과 값은 저장하지 않았고 참고 수정안과 책임 있는 보안 제보 초안은 로컬에만 만들었습니다."
+          : "운영자가 제공한 비식별 관찰 기록을 검토했습니다. 참고 수정안과 책임 있는 보안 제보 초안을 로컬에서 만들었으며, 대상 서비스 요청이나 외부 전송은 수행하지 않았습니다."
+        : "Read-only source review completed. Findings describe the inspected code; tests were not run.";
     case "INCOMPLETE_REVIEW":
       return "The source review ended before a complete summary was recorded. Inspect the available notes and evidence.";
     case "TESTS_PASSED":
@@ -869,14 +881,18 @@ export function statusDescription(view: RunView): string {
     case "BROKE_FUNCTION":
       return "The regression passes but functional tests now fail.";
     case "RUNNING":
-      return isRepositoryReview(view) ? "The agent is reviewing source for the requested task." : "The harness is executing.";
+      return isExternalAssessment(view) ? view.mode === "live" ? "Red가 실제 API 응답을 탐색하고 Blue가 관찰 근거를 검토하고 있습니다." : "Red와 Blue가 비식별 외부 관찰 기록을 검토하고 있습니다." : isRepositoryReview(view) ? "The agent is reviewing source for the requested task." : "The harness is executing.";
     default:
       return view.reason ?? "";
   }
 }
 
 export function isRepositoryReview(view: Pick<RunView, "workflow" | "status">): boolean {
-  return view.workflow === "repository_review" || view.status === "REVIEW_COMPLETE" || view.status === "INCOMPLETE_REVIEW";
+  return view.workflow === "repository_review" || (view.workflow !== "external_assessment" && (view.status === "REVIEW_COMPLETE" || view.status === "INCOMPLETE_REVIEW"));
+}
+
+export function isExternalAssessment(view: Pick<RunView, "workflow">): boolean {
+  return view.workflow === "external_assessment";
 }
 
 export function isRepositoryRemediation(view: Pick<RunView, "workflow" | "status">): boolean {
@@ -884,7 +900,7 @@ export function isRepositoryRemediation(view: Pick<RunView, "workflow" | "status
 }
 
 export function repositoryWorkflowLabel(view: Pick<RunView, "workflow" | "status">): string {
-  return isRepositoryRemediation(view) ? "Review & propose fix" : isRepositoryReview(view) ? "Repository review" : "Repair with regression";
+  return isExternalAssessment(view) ? "외부 보안 검토 · 책임 있는 제보" : isRepositoryRemediation(view) ? "Review & propose fix" : isRepositoryReview(view) ? "Repository review" : "Repair with regression";
 }
 
 export function roleLabel(role: AgentRole | undefined): string {

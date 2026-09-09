@@ -26,6 +26,7 @@ import {
   groupActivity,
   roleLabel,
   statusTone,
+  isExternalAssessment,
   type ActivityItem,
   type CheckItem,
   type FeedEntry,
@@ -46,7 +47,7 @@ export interface FeedSelection {
   openEvidence: (phase?: string) => void;
 }
 
-export function ActivityFeed({ view, files, now, live, actions }: { view: RunView; files: string[]; now: number; live: boolean; actions: FeedSelection }) {
+export function ActivityFeed({ view, files, now, live, replaying = false, actions }: { view: RunView; files: string[]; now: number; live: boolean; replaying?: boolean; actions: FeedSelection }) {
   const entries = useMemo(() => groupActivity(view.activity), [view.activity]);
   const [follow, setFollow] = useState(true);
   const scroller = useRef<HTMLDivElement>(null);
@@ -77,7 +78,7 @@ export function ActivityFeed({ view, files, now, live, actions }: { view: RunVie
         {view.status === "RUNNING" && (
           <div className="flex items-center gap-2 py-3 pl-2 text-[0.85em] text-ink-3">
             <span className="relative inline-block size-1.5 rounded-full bg-info pulse-dot" />
-            {live ? "waiting for the next event" : "run ended without a final event"}
+            {replaying ? isExternalAssessment(view) ? "방금 실행한 실제 이벤트를 재생 중" : "Replay · showing recorded events" : live ? isExternalAssessment(view) ? "다음 실제 응답을 기다리는 중" : "waiting for the next event" : "run ended without a final event"}
           </div>
         )}
       </div>
@@ -133,7 +134,7 @@ function NowCard({ view, now, live }: { view: RunView; now: number; live: boolea
       ) : running ? (
         <div className="mt-1 flex items-center gap-2 text-[1.05em] font-medium tracking-tight text-ink-2">
           <CircleDashed className="size-4 animate-spin text-ink-3" style={{ animationDuration: "3s" }} />
-          Harness is working…
+          {isExternalAssessment(view) ? "실시간 점검이 다음 단계를 준비하는 중…" : "Harness is working…"}
         </div>
       ) : (
         <div className="mt-1 flex items-center gap-2">
@@ -151,7 +152,7 @@ function NowCard({ view, now, live }: { view: RunView; now: number; live: boolea
           {skill && <div className="flex items-center gap-1.5 text-[0.9em] text-ink-3"><Puzzle className="size-3 shrink-0" /><Mono className="truncate">{skill.skillId}</Mono><span className="shrink-0">v{skill.version}</span></div>}
         </div>
       )}
-      {!running && view.usage.modelTurns === 0 && !decision && <p className="mt-2 text-[0.83em] text-ink-3">{view.mode === "scripted" ? "Scripted run · no model invoked." : "No model invoked."}{view.status === "NOT_REPRODUCIBLE" ? " The supplied regression already passed." : ""}</p>}
+      {!running && view.usage.modelTurns === 0 && !decision && <p className="mt-2 text-[0.83em] text-ink-3">{isExternalAssessment(view) ? "모델 호출 없음 · 실제 HTTP 응답을 로컬 규칙으로 판정했습니다." : view.mode === "scripted" ? "Scripted run · no model invoked." : "No model invoked."}{view.status === "NOT_REPRODUCIBLE" ? " The supplied regression already passed." : ""}</p>}
     </div>
   );
 }

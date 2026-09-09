@@ -13,6 +13,7 @@ describe("new repository workflow dialog", () => {
     expect(html).toContain("Red identifies source concerns; Blue checks the evidence and proposes a fix.");
     expect(html).toContain("Tests are not run in this workflow");
     expect(html).toContain("Repair with regression");
+    expect(html).toContain("실시간 외부 API");
     expect(html).not.toContain("Existing regression test (required)");
     expect(html).not.toContain("Patch file");
     const report = html.match(/<textarea[^>]*placeholder="Add context[^>]*>/)?.[0];

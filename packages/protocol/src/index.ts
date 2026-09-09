@@ -39,6 +39,8 @@ export interface Task {
   split: Split;
 }
 
+export * from "./audience.js";
+
 export interface Budgets {
   maxTokens: number;
   maxSteps: number;
@@ -97,7 +99,7 @@ export interface BaseEvent {
 export interface RunStartEvent extends BaseEvent {
   type: "run_start";
   runKind: "benchmark" | "local_repository";
-  workflow?: "repository_review" | "repository_repair" | "repository_remediation";
+  workflow?: "repository_review" | "repository_repair" | "repository_remediation" | "external_assessment";
   configHash: string;
   taskId?: string;
   mode?: ExecutionMode;

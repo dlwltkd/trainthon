@@ -14,12 +14,12 @@ type ReadPage = { content: string; truncated: boolean; next: { startLine: number
 type SearchPage = { hits: { line: number }[]; truncated: boolean; nextOffset: number | null };
 type DirectoryPage = { entries: string[]; truncated: boolean; nextOffset: number | null };
 
-async function fixture(files: Record<string, string>, remediate = false) {
+async function fixture(files: Record<string, string>, remediate = false, includeCodeSuggestions = false) {
   const dir = mkdtempSync(join(tmpdir(), "vouch-source-pages-")); roots.push(dir);
   for (const [path, content] of Object.entries(files)) { mkdirSync(dirname(join(dir, path)), { recursive: true }); writeFileSync(join(dir, path), content); }
   const workspace: LocalWorkspace = { dir, baselineDir: dir, verificationDir: join(dir, "verification"), commit: "a".repeat(40), regressionPath: "tests/test_app.py", regressionHash: "b".repeat(64), files: Object.keys(files), protectedPaths: Object.keys(files).filter(path => path.startsWith("tests/")), cleanup() {} };
   const controller = new AbortController();
-  const toolset = buildSourceReviewTools(workspace, controller.signal, () => {}, remediate);
+  const toolset = buildSourceReviewTools(workspace, controller.signal, () => {}, remediate, "blue", [], includeCodeSuggestions);
   const call = caller(toolset.tools);
   await call("use_skill", { skillId: "source-security-review", reason: "Inspect source evidence." });
   await call("report_progress", plan);
@@ -33,6 +33,47 @@ function caller(tools: AgentTool[]) {
     return await tool.execute(tool.schema.parse(args), { callId: `call-${++sequence}` }) as T;
   };
 }
+
+test("code suggestions preserve the snapshot, use exact source lines, and expire when their finding changes", async () => {
+  const source = "// 계산\r\nexport const add = (a, b) => a - b;\r\n";
+  const f = await fixture({ "src/add.js": source }, false, true);
+  const finding = { id: "addition", title: "Addition subtracts", severity: "low", confidence: "confirmed", evidence: ["src/add.js"], summary: "The implementation subtracts.", recommendation: "Use addition." };
+  const suggestion = { findingId: "addition", path: "src/add.js", oldText: source.split("\r\n")[1] + "\r\n", newText: "export const add = (a, b) => a + b;\r\n", explanation: "덧셈으로 수정합니다." };
+  await f.call("read_file", { path: "src/add.js" });
+  await f.call("report_finding", finding);
+  expect(await f.call("suggest_code_change", suggestion)).toMatchObject({ startLine: 2, endLine: 2, applied: false, testsRun: false });
+  expect(f.toolset.codeSuggestions()).toEqual([{ ...suggestion, startLine: 2, endLine: 2 }]);
+  expect(readFileSync(join(f.dir, "src/add.js"), "utf8")).toBe(source);
+  await f.call("report_finding", { ...finding, confidence: "potential" });
+  expect(f.toolset.codeSuggestions()).toEqual([]);
+  await expect(f.call("suggest_code_change", suggestion)).rejects.toThrow("confirmed finding");
+});
+
+test("code suggestions reject unsupported, absent, ambiguous, unchanged and oversized excerpts", async () => {
+  const f = await fixture({ "app.py": "answer = 1\nanswer = 1\n", "other.py": "answer = 1\n" }, false, true);
+  const finding = { id: "answer", title: "Answer needs a change", severity: "low", confidence: "confirmed", evidence: ["app.py"], summary: "Fixture observation.", recommendation: "Review the answer." };
+  const suggestion = { findingId: "answer", path: "app.py", oldText: "answer = 1", newText: "answer = 2", explanation: "값을 검토합니다." };
+  await expect(f.call("suggest_code_change", suggestion)).rejects.toThrow("confirmed finding");
+  await f.call("read_file", { path: "app.py" });
+  await f.call("report_finding", finding);
+  await expect(f.call("suggest_code_change", { ...suggestion, path: "other.py" })).rejects.toThrow("confirmed finding");
+  await expect(f.call("suggest_code_change", { ...suggestion, oldText: "invented = 1" })).rejects.toThrow("not found");
+  await expect(f.call("suggest_code_change", suggestion)).rejects.toThrow("more than once");
+  await expect(f.call("suggest_code_change", { ...suggestion, newText: suggestion.oldText })).rejects.toThrow("must change");
+  await expect(f.call("suggest_code_change", { ...suggestion, newText: "가".repeat(5000) })).rejects.toThrow("12 KB");
+  expect(f.toolset.codeSuggestions()).toEqual([]);
+});
+
+test("code suggestions are opt-in and only available to Blue in read-only reviews", async () => {
+  const f = await fixture({ "app.py": "answer = 1\n" });
+  const names = (tools: AgentTool[]) => tools.map(tool => tool.name);
+  expect(names(f.toolset.tools)).not.toContain("suggest_code_change");
+  expect(names(buildSourceReviewTools(f.workspace, f.controller.signal, () => {}, false, "red", [], true).tools)).not.toContain("suggest_code_change");
+  expect(names(buildSourceReviewTools(f.workspace, f.controller.signal, () => {}, true, "blue", [], true).tools)).not.toContain("suggest_code_change");
+  const enabled = names(buildSourceReviewTools(f.workspace, f.controller.signal, () => {}, false, "blue", [], true).tools);
+  expect(enabled).toContain("suggest_code_change");
+  for (const name of ["write_file", "edit_file", "inspect_diff", "run_regression"]) expect(enabled).not.toContain(name);
+});
 
 test("initial source context includes only complete bounded files and makes only those paths available as evidence", async () => {
   const f = await fixture({ "app.py": "answer = 42\n", "other.py": "unread = True\n", "large.py": "x".repeat(200_000), ".env": "PRIVATE_PLACEHOLDER=value" });

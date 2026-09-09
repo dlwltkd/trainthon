@@ -2,7 +2,7 @@ import { z, type ZodType } from "zod";
 import { join } from "node:path";
 import { lstatSync } from "node:fs";
 import { createHash } from "node:crypto";
-import type { EventInput, FindingReportedEvent, FindingAssessedEvent } from "@vouch/protocol";
+import type { EventInput, FindingReportedEvent, FindingAssessedEvent, SourceCodeSuggestion } from "@vouch/protocol";
 import type { AgentTool } from "@vouch/model";
 import { createAgentTrace, type AgentTrace, type TraceWorkspace } from "./agent-trace.js";
 import { checkSourceSyntax } from "./source-syntax.js";
@@ -200,13 +200,14 @@ export function buildLocalReviewTools(workspace: LocalWorkspace, signal: AbortSi
   return [...trace.tools, ...readTools(workspace, signal, queue, trace)];
 }
 
-export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortSignal, onEvent: (event: EventInput) => void, remediate = false, role: "red" | "blue" = "blue", redFindingIds: readonly string[] = []) {
+export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortSignal, onEvent: (event: EventInput) => void, remediate = false, role: "red" | "blue" = "blue", redFindingIds: readonly string[] = [], includeCodeSuggestions = false) {
   const queue = new SerialToolQueue();
   const canEdit = remediate && role === "blue";
   const stage = canEdit ? "PATCH" : "REVIEW";
   const trace = createAgentTrace({ workspace, signal, onEvent, role, stage, skills: canEdit ? SOURCE_REPAIR_SKILLS : REPOSITORY_REVIEW_SKILLS, enqueue: operation => queue.run(operation) });
   const findings = new Map<string, Omit<FindingReportedEvent, "runId" | "seq" | "ts">>();
   const assessments = new Map<string, Omit<FindingAssessedEvent, "runId" | "seq" | "ts">>();
+  const suggestions = new Map<string, SourceCodeSuggestion>();
   const changeFindings = new Map<string, string[]>();
   let inspectedPatch: string | undefined;
   let syntaxInvalidFiles: string[] = [];
@@ -228,11 +229,41 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
       const { id, ...details } = finding;
       const event = { type: "finding_reported", findingId: id, ...details, callId: context.callId, agentRole: role, stage } as const;
       findings.set(id, event); onEvent(event);
+      for (const [key, suggestion] of suggestions) if (suggestion.findingId === id) suggestions.delete(key);
       const reassessFindingIds: string[] = [];
       for (const [redId, assessment] of assessments) if (assessment.blueFindingId === id) { assessments.delete(redId); reassessFindingIds.push(redId); }
       return { recorded: true, findingId: id, ...(reassessFindingIds.length ? { reassessFindingIds } : {}) };
     }),
   }];
+  if (includeCodeSuggestions && role === "blue" && !canEdit) {
+    const snippet = z.string().max(12_000).refine(value => Buffer.byteLength(value) <= 12_000, "code snippet exceeds 12 KB");
+    const schema = z.object({
+      findingId: z.string().min(1).max(60), path: z.string().min(1).max(500),
+      oldText: snippet.refine(value => value.length > 0, "oldText must not be empty").describe("Exact, uniquely matching source excerpt from the pinned file, without line numbers or Markdown fences."),
+      newText: snippet.describe("Proposed replacement for oldText. Preserve surrounding behavior; include needed imports and explain any integration requirements."),
+      explanation: z.string().trim().min(1).max(1200).describe("Briefly explain the defensive change and any remaining owner decisions, in Korean."),
+    }).strict();
+    tools.push({ name: "suggest_code_change", description: "Save a before/after code suggestion for your own confirmed source finding. This only records a proposal: it does not edit files or run code. Read the file first; oldText must match it exactly once. Up to four suggestions, one per finding and file; repeating the pair replaces the proposal. Revising a finding clears its suggestions.", schema,
+      execute: (args, context) => queue.run(() => {
+        signal.throwIfAborted(); trace.requireReady();
+        const suggestion = schema.parse(args);
+        const finding = findings.get(suggestion.findingId);
+        if (!finding || finding.confidence !== "confirmed" || !finding.evidence.includes(suggestion.path)) throw new Error("a suggestion requires your own confirmed finding with this file in its evidence");
+        trace.assertEvidence([suggestion.path]);
+        if (!context?.callId) throw new Error("a logged call is required");
+        if (suggestion.oldText === suggestion.newText) throw new Error("the suggested code must change the original excerpt");
+        const key = `${suggestion.findingId}:${suggestion.path}`;
+        if (suggestions.size >= 4 && !suggestions.has(key)) throw new Error("code suggestion limit reached");
+        const content = repositoryText(workspace, suggestion.path);
+        replaceExact(content, suggestion.oldText, suggestion.newText);
+        const index = content.indexOf(suggestion.oldText);
+        const startLine = content.slice(0, index).split("\n").length;
+        const endLine = content.slice(0, index + suggestion.oldText.length - 1).split("\n").length;
+        suggestions.set(key, { ...suggestion, startLine, endLine });
+        return { recorded: true, path: suggestion.path, startLine, endLine, applied: false, testsRun: false };
+      }),
+    });
+  }
   if (role === "blue" && redFindingIds.length) {
     const schema = z.object({
       findingId: z.string().min(1).max(60), verdict: z.enum(["confirmed", "dismissed", "unresolved"]),
@@ -300,7 +331,7 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
       files: supplied.map(({ path, content }) => ({ path, bytes: Buffer.byteLength(content), sha256: createHash("sha256").update(content).digest("hex") })),
     };
   };
-  return { tools, sourceContext, drain: () => queue.drain(), findings: () => [...findings.values()], assessments: () => [...assessments.values()], unassessedFindingIds: () => redFindingIds.filter(id => !assessments.has(id)), observedFiles: () => trace.observedFiles(), inspectedPatch: () => inspectedPatch, syntaxInvalidFiles: () => [...syntaxInvalidFiles], changeFindings: () => Object.fromEntries(changeFindings) };
+  return { tools, sourceContext, drain: () => queue.drain(), findings: () => [...findings.values()], assessments: () => [...assessments.values()], codeSuggestions: () => [...suggestions.values()], unassessedFindingIds: () => redFindingIds.filter(id => !assessments.has(id)), observedFiles: () => trace.observedFiles(), inspectedPatch: () => inspectedPatch, syntaxInvalidFiles: () => [...syntaxInvalidFiles], changeFindings: () => Object.fromEntries(changeFindings) };
 }
 
 export interface LocalRepairToolset {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowRight, Check, ChevronDown, Circle, FileCode2, GitBranch, ListChecks, MessageSquareText, Play, Puzzle, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { groupActivity, isRepositoryReview, isRepositoryRemediation, roleLabel, statusLabel, STAGE_LABEL, type EvidenceTarget, type ActivityItem, type DecisionItem, type RunView, type SkillItem, type ToolCallItem } from "@/lib/derive";
+import { groupActivity, isExternalAssessment, isRepositoryReview, isRepositoryRemediation, roleLabel, statusLabel, STAGE_LABEL, type EvidenceTarget, type ActivityItem, type DecisionItem, type RunView, type SkillItem, type ToolCallItem } from "@/lib/derive";
 import { formatClock, formatDuration, stringify } from "@/lib/format";
 import { Button, Chip, Empty, Mono, Panel, PanelHeader, RoleChip, Spinner } from "./ui";
 import { EvidenceLinks } from "./EvidenceLinks";
@@ -17,34 +17,35 @@ export function AgentIntent({ view, files, onEvidence }: { view: RunView; files:
   const latestNote = [...view.activity].reverse().find((item) => item.kind === "note" && !item.final);
   const active = view.status === "RUNNING";
   const sourcePatch = isRepositoryRemediation(view);
+  const external = isExternalAssessment(view);
   const findings = (isRepositoryReview(view) || isRepositoryRemediation(view)) ? [...view.activity].reverse().find((item) => item.kind === "note" && item.final && item.agentRole !== "red") : undefined;
   return <div className="flex flex-col gap-3">
     {findings?.kind === "note" && <Panel className="overflow-hidden"><PanelHeader title={<><MessageSquareText className="size-3.5" /> {sourcePatch ? "Review & patch notes" : "Review findings"}</>} aside={<Chip tone={sourcePatch ? "warn" : "info"}>{sourcePatch ? "Source patch · untested" : "Source review"}</Chip>} /><MarkdownSummary text={findings.text} className="p-4 text-[0.94em] text-ink-2" /></Panel>}
     <Panel className="overflow-hidden">
-      <PanelHeader title={<><MessageSquareText className="size-3.5" /> {active ? "Current intention" : "Last agent decision"}</>} aside={decision && <RoleChip role={decision.agentRole} />} />
+      <PanelHeader title={<><MessageSquareText className="size-3.5" /> {external ? active ? "현재 판단" : "마지막 에이전트 판단" : active ? "Current intention" : "Last agent decision"}</>} aside={decision && <RoleChip role={decision.agentRole} />} />
       <div className="space-y-3 p-4">
         {decision ? <>
           <p className="leading-relaxed text-ink">{decision.summary}</p>
-          <div className="rounded-lg bg-info-soft/60 p-3"><div className="mb-1 flex items-center gap-1.5 text-[0.8em] font-semibold uppercase tracking-wide text-info"><ArrowRight className="size-3.5" /> Next action {active ? "" : "· at this point in the run"}</div><p className="text-[0.94em] text-ink-2">{decision.nextAction}</p></div>
+          <div className="rounded-lg bg-info-soft/60 p-3"><div className="mb-1 flex items-center gap-1.5 text-[0.8em] font-semibold uppercase tracking-wide text-info"><ArrowRight className="size-3.5" /> {external ? "다음 행동" : `Next action ${active ? "" : "· at this point in the run"}`}</div><p className="text-[0.94em] text-ink-2">{decision.nextAction}</p></div>
           <EvidenceLinks references={decision.evidence} view={view} files={files} onEvidence={onEvidence} />
-          <p className="text-[0.78em] text-ink-3">Agent-reported decision summary · event #{decision.seq}</p>
+          <p className="text-[0.78em] text-ink-3">{external ? `에이전트 공개 판단 요약 · 이벤트 #${decision.seq}` : `Agent-reported decision summary · event #${decision.seq}`}</p>
         </> : <>
-          <p className="font-medium">{!active && !invokedModel ? (view.mode === "scripted" ? "Scripted run · no model invoked" : "No model invoked") : invokedModel ? "Awaiting an agent decision update" : "Harness checks are running"}</p>
-          <p className="text-[0.9em] leading-relaxed text-ink-2">{view.status === "NOT_REPRODUCIBLE" && !invokedModel ? "The supplied regression already passed. The harness finished before calling a model or requesting a patch." : active && latestNote?.kind === "note" ? latestNote.text : !invokedModel ? "This record contains no model turns. Test results and harness actions are shown in the activity feed." : "This record does not contain structured decision updates."}</p>
+          <p className="font-medium">{!active && !invokedModel ? external ? "모델 호출 없음 · 실제 HTTP 응답 판정" : view.mode === "scripted" ? "Scripted run · no model invoked" : "No model invoked" : invokedModel ? "Awaiting an agent decision update" : external ? "실시간 HTTP 점검 실행 중" : "Harness checks are running"}</p>
+          <p className="text-[0.9em] leading-relaxed text-ink-2">{view.status === "NOT_REPRODUCIBLE" && !invokedModel ? "The supplied regression already passed. The harness finished before calling a model or requesting a patch." : active && latestNote?.kind === "note" ? latestNote.text : !invokedModel ? external ? "실제 응답의 상태·필드·보안 표식만 로컬 규칙으로 판정했습니다." : "This record contains no model turns. Test results and harness actions are shown in the activity feed." : "This record does not contain structured decision updates."}</p>
         </>}
         {view.currentAction && <div className="flex items-start gap-2 border-t border-line pt-3 text-[0.87em]"><Spinner className="mt-0.5 size-3 shrink-0 text-info" /><div className="min-w-0"><span className="font-medium text-info">Tool in progress</span><p className="mt-0.5 break-words text-ink-2">{view.currentAction.summary}</p></div></div>}
         {view.currentModel && <div className="border-t border-line pt-3"><ModelRequest request={view.currentModel} now={view.lastTs} /></div>}
       </div>
     </Panel>
     <Panel className="overflow-hidden">
-      <PanelHeader title={<><ListChecks className="size-3.5" /> Agent plan</>} aside={decision?.plan.length ? <Chip>{decision.plan.filter((step) => step.status === "completed").length}/{decision.plan.length}</Chip> : undefined} />
-      {decision?.plan.length ? <ol className="space-y-3 p-4">{decision.plan.map((step) => <li key={step.id} className="flex items-start gap-2.5"><span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full", step.status === "completed" ? "bg-pass-soft text-pass" : step.status === "in_progress" ? "bg-info-soft text-info" : "text-ink-3")}>{step.status === "completed" ? <Check className="size-3" /> : step.status === "in_progress" ? <Play className="size-2.5 fill-current" /> : <Circle className="size-3" />}</span><div><p className={cn("text-[0.9em] leading-relaxed", step.status === "pending" && "text-ink-3")}>{step.title}</p><span className="text-[0.75em] text-ink-3">{step.status.replace(/_/g, " ")}</span></div></li>)}</ol> : <p className="p-4 text-[0.88em] leading-relaxed text-ink-3">No agent plan has been reported. The stage rail above shows the harness workflow.</p>}
+      <PanelHeader title={<><ListChecks className="size-3.5" /> {external ? "에이전트 계획" : "Agent plan"}</>} aside={decision?.plan.length ? <Chip>{decision.plan.filter((step) => step.status === "completed").length}/{decision.plan.length}</Chip> : undefined} />
+      {decision?.plan.length ? <ol className="space-y-3 p-4">{decision.plan.map((step) => <li key={step.id} className="flex items-start gap-2.5"><span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full", step.status === "completed" ? "bg-pass-soft text-pass" : step.status === "in_progress" ? "bg-info-soft text-info" : "text-ink-3")}>{step.status === "completed" ? <Check className="size-3" /> : step.status === "in_progress" ? <Play className="size-2.5 fill-current" /> : <Circle className="size-3" />}</span><div><p className={cn("text-[0.9em] leading-relaxed", step.status === "pending" && "text-ink-3")}>{step.title}</p><span className="text-[0.75em] text-ink-3">{external ? step.status === "completed" ? "완료" : step.status === "in_progress" ? "진행 중" : "대기" : step.status.replace(/_/g, " ")}</span></div></li>)}</ol> : <p className="p-4 text-[0.88em] leading-relaxed text-ink-3">No agent plan has been reported. The stage rail above shows the harness workflow.</p>}
     </Panel>
     <Panel className="overflow-hidden">
-      <PanelHeader title={<><Puzzle className="size-3.5" /> Skills</>} aside={<Chip>{view.skills.length} calls</Chip>} />
+      <PanelHeader title={<><Puzzle className="size-3.5" /> {external ? "스킬" : "Skills"}</>} aside={<Chip>{external ? `${view.skills.length}회` : `${view.skills.length} calls`}</Chip>} />
       <div className="space-y-3 p-4">
         {view.skills.length ? view.skills.map((skill) => <div key={skill.id} className="space-y-1.5"><div className="flex items-center gap-2"><RoleChip role={skill.agentRole} /><Mono className="break-all font-medium">{skill.skillId}</Mono></div><div className="text-[0.8em] text-ink-3">v{skill.version} · {STAGE_LABEL[skill.stage]}</div><p className="text-[0.87em] leading-relaxed text-ink-2">{skill.reason}</p></div>) : <p className="text-[0.88em] text-ink-3">No skill calls recorded.</p>}
-        {view.guidance.length > 0 && <details className="border-t border-line pt-3"><summary className="cursor-pointer text-[0.82em] text-ink-3">Configured guidance · {view.guidance.length}</summary><div className="mt-2 space-y-2">{view.guidance.map((guidance) => <div key={guidance.id} className="text-[0.8em] text-ink-2"><Mono>{guidance.guidanceId}</Mono><div className="mt-0.5 text-ink-3">v{guidance.version} · {roleLabel(guidance.agentRole)}</div></div>)}</div></details>}
+        {view.guidance.length > 0 && <details className="border-t border-line pt-3"><summary className="cursor-pointer text-[0.82em] text-ink-3">{external ? "설정된 가이드" : "Configured guidance"} · {view.guidance.length}</summary><div className="mt-2 space-y-2">{view.guidance.map((guidance) => <div key={guidance.id} className="text-[0.8em] text-ink-2"><Mono>{guidance.guidanceId}</Mono><div className="mt-0.5 text-ink-3">v{guidance.version} · {roleLabel(guidance.agentRole)}</div></div>)}</div></details>}
       </div>
     </Panel>
   </div>;

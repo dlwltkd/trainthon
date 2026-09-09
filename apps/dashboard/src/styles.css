@@ -108,6 +108,20 @@ body {
   @apply rounded-lg border border-line-2 bg-panel px-3 py-2 font-normal text-ink outline-none transition-colors focus:border-info focus:ring-2 focus:ring-info/15;
 }
 
+.audience-page {
+  background: radial-gradient(ellipse at 50% 0%, #edf3ff 0%, #fafbfe 42%, #f6f6f7 100%);
+  --ui-scale: 1;
+}
+
+.audience-button {
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3.5 py-2 text-xs font-medium text-ink-2 transition-colors hover:border-line-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-role;
+}
+
+.audience-page :is(a, button, input):focus-visible {
+  outline: 2px solid var(--color-blue-role);
+  outline-offset: 3px;
+}
+
 .run-layout {
   grid-template-columns: minmax(220px, 0.7fr) minmax(360px, 1.25fr) minmax(420px, 1.5fr);
   align-items: start;

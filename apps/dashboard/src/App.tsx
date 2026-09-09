@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronLeft, Plus, Presentation, ShieldCheck } from "lucide-react";
+import { ChevronLeft, Plus, Presentation, QrCode, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { routeHref, useHashRoute } from "@/hooks/useHashRoute";
 import { useLocalStorage } from "@/hooks/useTicker";
@@ -8,25 +8,31 @@ import { NewRunDialog } from "./components/NewRunDialog";
 import { RunsHome } from "./components/RunsHome";
 import { RunView } from "./components/RunView";
 import { Button } from "./components/ui";
+import { AudiencePage } from "./components/AudiencePage";
+import { AudiencePresent } from "./components/AudiencePresent";
 
 export function App() {
   const [route, navigate] = useHashRoute();
   const [presentation, setPresentation] = useLocalStorage<boolean>("vouch.presentation", false);
   const [dialog, setDialog] = useState(false);
+  const audience = document.documentElement.dataset.audience === "true" || route.name === "join" || route.name === "present";
 
   useEffect(() => {
-    document.documentElement.classList.toggle("presentation", presentation);
-  }, [presentation]);
+    document.documentElement.classList.toggle("presentation", presentation && !audience);
+  }, [presentation, audience]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (audience) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
       if (e.key === "p" && !e.metaKey && !e.ctrlKey) setPresentation(!presentation);
       if (e.key === "n" && !e.metaKey && !e.ctrlKey) setDialog(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [presentation, setPresentation]);
+  }, [presentation, setPresentation, audience]);
+
+  if (audience) return route.name === "present" ? <AudiencePresent /> : <AudiencePage key={route.name === "join" ? route.id ?? "join" : "join"} id={route.name === "join" ? route.id : undefined} />;
 
   return (
     <div className="flex h-full flex-col">
@@ -53,6 +59,7 @@ export function App() {
           </NavLink>
         </nav>
         <div className="ml-auto flex items-center gap-1.5">
+          <a href={routeHref({ name: "join" })} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-blue-role hover:bg-info-soft"><QrCode className="size-3.5" /><span className="hidden sm:inline">Try Vouch</span></a>
           <Button size="sm" variant={presentation ? "primary" : "ghost"} onClick={() => setPresentation(!presentation)} title="Presentation mode (p)">
             <Presentation className="size-3.5" />
             <span className="hidden sm:inline">Present</span>
