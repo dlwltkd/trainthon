@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { applyLocalPatch, captureLocalChanges, createVerificationWorkspace, prepareLocalWorkspace, writeLocalSource } from "./local-workspace.js";
+import { applyLocalPatch, captureLocalChanges, createVerificationWorkspace, prepareLocalWorkspace, prepareRepositorySnapshot, writeLocalSource } from "./local-workspace.js";
 import { listDirTool, readFileTool, writeFileTool } from "./fs-tools.js";
 import { runCommand } from "./exec.js";
 
@@ -121,6 +121,50 @@ describe("committed repository workspace", () => {
     await expect(createVerificationWorkspace(workspace)).rejects.toThrow("protected file changed");
   });
 
+});
+
+describe("repository snapshot without a regression", () => {
+  test("reads committed source without installing dependencies or overlaying working-tree files", async () => {
+    const f = fixture();
+    writeFileSync(join(f.repo, "src/sum.ts"), "uncommitted change\n");
+    const snapshot = await prepareRepositorySnapshot({ repoPath: f.repo, workspacesDir: join(f.root, "snapshots") });
+    expect(snapshot.dir).toBe(snapshot.baselineDir);
+    expect(snapshot.commit).toBe(f.git("rev-parse", "HEAD").toString().trim());
+    expect(readFileSync(join(snapshot.dir, "src/sum.ts"), "utf8")).toContain("a - b");
+    expect(snapshot.files).not.toContain("regression.test.ts");
+    expect(snapshot.files).not.toContain(".env");
+    expect(snapshot.files).not.toContain("private.key");
+    expect(snapshot.protectedPaths).toEqual(snapshot.files);
+    expect(snapshot).not.toHaveProperty("regressionPath");
+    expect(existsSync(join(snapshot.dir, "node_modules"))).toBe(false);
+    snapshot.cleanup();
+    snapshot.cleanup();
+    expect(existsSync(snapshot.dir)).toBe(false);
+    expect(readFileSync(join(f.repo, "src/sum.ts"), "utf8")).toBe("uncommitted change\n");
+  });
+
+  test("selects the requested commit and needs neither a report nor an existing test", async () => {
+    const f = fixture();
+    rmSync(join(f.repo, "regression.test.ts"));
+    const first = f.git("rev-parse", "HEAD").toString().trim();
+    writeFileSync(join(f.repo, "src/sum.ts"), "export const sum = (a: number, b: number) => a + b;\n");
+    f.git("add", "src/sum.ts");
+    f.git("-c", "user.name=Test", "-c", "user.email=test@local", "commit", "-qm", "update source");
+    const snapshot = await prepareRepositorySnapshot({ repoPath: f.repo, ref: first, workspacesDir: join(f.root, "snapshots") });
+    expect(snapshot.commit).toBe(first);
+    expect(readFileSync(join(snapshot.dir, "src/sum.ts"), "utf8")).toContain("a - b");
+    snapshot.cleanup();
+    await expect(f.prepare()).rejects.toThrow("supplied regression must be an existing regular file");
+  });
+
+  test("honors cancellation before creating snapshot artifacts", async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    controller.abort();
+    const workspacesDir = join(f.root, "snapshots");
+    await expect(prepareRepositorySnapshot({ repoPath: f.repo, workspacesDir, signal: controller.signal })).rejects.toThrow();
+    expect(existsSync(workspacesDir)).toBe(false);
+  });
 });
 
 test("harness-owned Vitest options ignore computed config dependencies", () => {

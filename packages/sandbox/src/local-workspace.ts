@@ -54,23 +54,27 @@ export function readBoundedRegularFile(path: string, maxBytes: number, label = "
   }
 }
 
-export interface LocalWorkspace {
+export interface RepositorySnapshot {
   dir: string;
   baselineDir: string;
-  verificationDir: string;
   commit: string;
-  regressionPath: string;
-  regressionHash: string;
   files: string[];
   protectedPaths: string[];
   cleanup(): void;
 }
-export interface PrepareLocalWorkspaceOptions {
+export interface LocalWorkspace extends RepositorySnapshot {
+  verificationDir: string;
+  regressionPath: string;
+  regressionHash: string;
+}
+export interface PrepareRepositorySnapshotOptions {
   repoPath: string;
   ref?: string;
-  regressionPath: string;
   workspacesDir: string;
   signal?: AbortSignal;
+}
+export interface PrepareLocalWorkspaceOptions extends PrepareRepositorySnapshotOptions {
+  regressionPath: string;
 }
 
 function validateRelative(path: string): void {
@@ -108,9 +112,7 @@ async function git(repoPath: string, args: string[], signal?: AbortSignal): Prom
   return stdout;
 }
 
-export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions): Promise<LocalWorkspace> {
-  validateRelative(opts.regressionPath);
-  if (isHiddenPath(opts.regressionPath)) throw new Error("regression cannot be a hidden or credential file");
+async function readCommittedRepository(opts: PrepareRepositorySnapshotOptions) {
   const repoPath = realpathSync(resolve(opts.repoPath));
   const gitRoot = (await git(repoPath, ["rev-parse", "--show-toplevel"], opts.signal)).toString().trim();
   if (realpathSync(gitRoot) !== repoPath) throw new Error("--repo must identify the Git repository root");
@@ -135,10 +137,43 @@ export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions):
     original.set(path, await git(repoPath, ["cat-file", "blob", oid], opts.signal));
     modes.set(path, mode === "100755" ? 0o755 : 0o644);
   }
+  return { repoPath, commit, original, modes, bytes };
+}
+
+function writeSnapshotFiles(directory: string, original: Map<string, Buffer>, modes: Map<string, number>, signal?: AbortSignal): void {
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  for (const [path, content] of original) {
+    signal?.throwIfAborted();
+    const target = join(directory, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
+    chmodSync(target, modes.get(path) ?? 0o644);
+  }
+}
+
+export async function prepareRepositorySnapshot(opts: PrepareRepositorySnapshotOptions): Promise<RepositorySnapshot> {
+  const { commit, original, modes } = await readCommittedRepository(opts);
+  opts.signal?.throwIfAborted();
+  mkdirSync(resolve(opts.workspacesDir), { recursive: true, mode: 0o700 });
+  const root = mkdtempSync(join(resolve(opts.workspacesDir), "snapshot-"));
+  const baselineDir = join(root, "baseline");
+  const snapshot: RepositorySnapshot = {
+    dir: baselineDir, baselineDir, commit,
+    files: [...original.keys()].sort(), protectedPaths: [...original.keys()].sort(),
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
+  try { writeSnapshotFiles(baselineDir, original, modes, opts.signal); return snapshot; }
+  catch (error) { snapshot.cleanup(); throw error; }
+}
+
+export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions): Promise<LocalWorkspace> {
+  validateRelative(opts.regressionPath);
+  if (isHiddenPath(opts.regressionPath)) throw new Error("regression cannot be a hidden or credential file");
+  const { repoPath, commit, original, modes, bytes: committedBytes } = await readCommittedRepository(opts);
   const supplied = safePath(repoPath, opts.regressionPath);
   if (!existsSync(supplied)) throw new Error("supplied regression must be an existing regular file");
   const regression = readBoundedRegularFile(supplied, MAX_FILE_BYTES, "regression");
-  bytes += regression.length - (original.get(opts.regressionPath)?.length ?? 0);
+  const bytes = committedBytes + regression.length - (original.get(opts.regressionPath)?.length ?? 0);
   original.set(opts.regressionPath, regression);
   if (bytes > MAX_REPOSITORY_BYTES || original.size > MAX_FILES) throw new Error("repository exceeds MVP snapshot limits (30 MB / 3000 files)");
   modes.set(opts.regressionPath, 0o644);
@@ -151,12 +186,26 @@ export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions):
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
   try {
-    for (const [path, content] of original) {
-      const target = join(workspace.baselineDir, path);
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, content);
-      chmodSync(target, modes.get(path) ?? 0o644);
-    }
+    writeSnapshotFiles(workspace.baselineDir, original, modes, opts.signal);
+    cpSync(workspace.baselineDir, workspace.dir, { recursive: true });
+    records.set(workspace, original);
+    recordModes.set(workspace, modes);
+    return workspace;
+  } catch (error) { workspace.cleanup(); throw error; }
+}
+
+export async function prepareSourceWorkspace(opts: PrepareRepositorySnapshotOptions): Promise<LocalWorkspace> {
+  const { commit, original, modes } = await readCommittedRepository(opts);
+  mkdirSync(resolve(opts.workspacesDir), { recursive: true, mode: 0o700 });
+  const root = mkdtempSync(join(resolve(opts.workspacesDir), "source-"));
+  const workspace: LocalWorkspace = {
+    dir: join(root, "candidate"), baselineDir: join(root, "baseline"), verificationDir: join(root, "verification"),
+    commit, regressionPath: "", regressionHash: "", files: [...original.keys()].sort(),
+    protectedPaths: [...original.keys()].filter(path => !isSourcePath(path)).sort(),
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+  };
+  try {
+    writeSnapshotFiles(workspace.baselineDir, original, modes, opts.signal);
     cpSync(workspace.baselineDir, workspace.dir, { recursive: true });
     records.set(workspace, original);
     recordModes.set(workspace, modes);
