@@ -137,6 +137,28 @@ describe("RunBudget", () => {
 });
 
 describe("SdkRunner", () => {
+  it("requests a fresh public checkpoint before compacting and excludes failed reads from memory", async () => {
+    const progressReply = (id: string) => reply([{ type: "tool-call", toolCallId: id, toolName: "report_progress", input: JSON.stringify({ summary: "Continue checking the fixture contract." }) }]);
+    const failedRead = reply([{ type: "tool-call", toolCallId: "failed-read", toolName: "read_file", input: JSON.stringify({ path: "unread.ts" }) }]);
+    const model = new MockLanguageModelV2({ doGenerate: [progressReply("initial"), failedRead, toolReply("read_file", "observed-read"), progressReply("checkpoint"), toolReply("read_file", "reread"), reply()] });
+    const run = input(budget({ maxSteps: 12, maxTokens: 500_000 }));
+    const read = vi.fn().mockRejectedValueOnce(new Error("fixture temporarily unavailable")).mockResolvedValueOnce("large-old-fixture-page".repeat(600)).mockResolvedValueOnce("Current fixture contract.");
+    run.tools = [fileTool(read), { name: "report_progress", description: "Publish a public progress update", schema: z.object({ summary: z.string() }), execute: async () => ({ recorded: true }) }];
+    run.requestPolicy = { maxRetries: 0, timeoutMs: 2_000, contextCheckpointBytes: 8_000 };
+    expect((await new SdkRunner(() => model).run(run)).finalText).toBe("Done");
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(model.doGenerateCalls[3]!.toolChoice).toEqual({ type: "tool", toolName: "report_progress" });
+    const continued = model.doGenerateCalls[4]!;
+    expect(continued.tools?.map(tool => tool.name)).toEqual(["read_file", "report_progress"]);
+    expect(continued.prompt[0]).toMatchObject({ role: "system", content: run.system });
+    expect(JSON.stringify(continued.prompt)).toContain(run.prompt);
+    expect(JSON.stringify(continued.prompt)).toContain("Continue checking the fixture contract.");
+    expect(JSON.stringify(continued.prompt)).not.toMatch(/large-old-fixture-page|fixture temporarily unavailable|unread.ts/);
+    expect(JSON.stringify(model.doGenerateCalls[5]!.prompt)).not.toContain("large-old-fixture-page");
+    expect(run.events.filter(event => event.type === "context_checkpoint")).toEqual([expect.objectContaining({ observedFiles: 1, findings: 0 })]);
+    expect(run.events.filter(event => event.type === "tool_error")).toHaveLength(1);
+  });
+
   it("refreshes public progress after several turns and restores all investigation tools afterward", async () => {
     const progressReply = (id: string) => reply([{ type: "tool-call", toolCallId: id, toolName: "report_progress", input: "{}" }]);
     const model = new MockLanguageModelV2({ doGenerate: [progressReply("initial"), toolReply("read_file", "read-1"), toolReply("read_file", "read-2"), progressReply("checkpoint"), toolReply("read_file", "read-3"), reply()] });

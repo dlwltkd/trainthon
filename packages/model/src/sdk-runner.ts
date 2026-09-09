@@ -6,6 +6,7 @@ import { emitUsage, eventContext, executeLoggedTool, toolEventArgs } from "./eve
 import type { AgentRunInput, AgentRunResult, AgentRunner } from "./types.js";
 import { ProviderRequestError, providerRequestError } from "./provider-errors.js";
 import { generateFromStream, type StreamActivity } from "./stream-response.js";
+import { SourceMemory } from "./source-memory.js";
 
 export type ModelResolver = (modelId: string) => LanguageModel;
 export type MissingUsagePolicy = "strict" | "conservative-bound";
@@ -102,6 +103,8 @@ export class SdkRunner implements AgentRunner {
       const policy = input.requestPolicy;
       if (policy && (!Number.isSafeInteger(policy.maxRetries) || policy.maxRetries < 0 || policy.maxRetries > 3 || !Number.isSafeInteger(policy.timeoutMs) || policy.timeoutMs <= 0 || policy.transport !== undefined && !["stream", "generate"].includes(policy.transport))) throw new Error("requestPolicy requires 0–3 retries, a positive timeout, and a supported transport");
       if (policy?.progressEverySteps !== undefined && (!Number.isSafeInteger(policy.progressEverySteps) || policy.progressEverySteps < 1 || policy.progressEverySteps > 20)) throw new Error("progressEverySteps must be an integer from 1 to 20");
+      if (policy?.contextCheckpointBytes !== undefined && (!Number.isSafeInteger(policy.contextCheckpointBytes) || policy.contextCheckpointBytes < 8_000 || policy.contextCheckpointBytes > 1_000_000)) throw new Error("contextCheckpointBytes must be an integer from 8000 to 1000000");
+      const memory = policy?.contextCheckpointBytes ? new SourceMemory(policy.contextCheckpointBytes) : undefined;
       const resolved = this.resolve(input.model);
       if (typeof resolved === "string") throw new Error("ModelResolver must return an explicit provider model");
       const model = wrapLanguageModel({
@@ -224,6 +227,7 @@ export class SdkRunner implements AgentRunner {
           inputSchema: spec.schema,
           execute: async (args: unknown, options) => {
             const result = await executeLoggedTool(input, budget, spec, args, options.toolCallId);
+            memory?.record(spec.name, args, result);
             if (spec.name === "report_progress") lastProgressStep = steps;
             return result;
           },
@@ -239,20 +243,28 @@ export class SdkRunner implements AgentRunner {
         maxRetries: 0,
         abortSignal: budget.signal,
         maxOutputTokens: Math.min(outputLimit, budget.remainingTokens),
-        prepareStep: () => {
-          if (policy?.progressEverySteps && lastProgressStep !== undefined && steps - lastProgressStep >= policy.progressEverySteps && tools.report_progress) {
+        prepareStep: ({ messages: originalMessages }) => {
+          if (lastProgressStep === steps && memory?.needsCheckpoint(originalMessages)) {
+            const checkpoint = memory.compact(originalMessages);
+            if (checkpoint) input.onEvent({ type: "context_checkpoint", ...checkpoint, ...eventContext(input) });
+          }
+          const messages = memory?.messages(originalMessages);
+          const staleProgress = policy?.progressEverySteps && lastProgressStep !== undefined && steps - lastProgressStep >= policy.progressEverySteps;
+          if ((staleProgress || lastProgressStep !== steps && memory?.needsCheckpoint(originalMessages)) && lastProgressStep !== undefined && tools.report_progress) {
             budget.check();
             input.onEvent({ type: "action_summary", summary: "Refreshing the public decision summary and source evidence", ...eventContext(input) });
             return {
+              messages,
               activeTools: ["report_progress"],
               toolChoice: { type: "tool", toolName: "report_progress" },
               system: `${input.system}\n\nProgress checkpoint: publish an updated public summary, observed evidence paths, and honest plan status with report_progress. State what the inspected source supports and which question remains. Keep private reasoning private. Repository tools return in the following response so you can continue the investigation.`,
             };
           }
-          if (!input.handoffAfter || steps === 0 || (steps < input.handoffAfter.steps && inputTokens + outputTokens < input.handoffAfter.tokens)) return;
+          if (!input.handoffAfter || steps === 0 || (steps < input.handoffAfter.steps && inputTokens + outputTokens < input.handoffAfter.tokens)) return messages ? { messages } : undefined;
           budget.check();
           input.onEvent({ type: "action_summary", summary: "Investigation allowance reached; preparing a source handoff with the evidence already observed.", ...eventContext(input) });
           return {
+            messages,
             activeTools: [],
             toolChoice: "none",
             system: `${input.system}\n\nThe investigation allowance for this role is complete. No further tools are available in this response. Return a concise final handoff using only source you actually observed. Identify supported observations, candidate findings, existing safeguards and unread paths or unresolved questions. Do not invent findings or claim the review is comprehensive. The next role will independently validate the source.`,

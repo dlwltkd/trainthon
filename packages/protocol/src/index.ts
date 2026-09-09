@@ -289,6 +289,18 @@ export interface ModelRequestEvent extends BaseEvent {
   stage: EngineState;
 }
 
+export interface ContextCheckpointEvent extends BaseEvent {
+  type: "context_checkpoint";
+  messagesBefore: number;
+  messagesAfter: number;
+  bytesBefore: number;
+  bytesAfter: number;
+  observedFiles: number;
+  findings: number;
+  agentRole: AgentRole;
+  stage: EngineState;
+}
+
 export interface BudgetUpdateEvent extends BaseEvent {
   type: "budget_update";
   tokens: number;
@@ -355,6 +367,7 @@ export type HarnessEvent =
   | TestRunEvent
   | ModelMsgEvent
   | ModelRequestEvent
+  | ContextCheckpointEvent
   | BudgetUpdateEvent
   | DiffSnapshotEvent
   | GradeEvent

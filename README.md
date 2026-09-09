@@ -199,6 +199,14 @@ Only execution metadata and public decision summaries are displayed.
 After six model steps without a successful progress update, the harness requests
 an updated public summary and evidence through `report_progress`, then restores
 the investigation tools. This checkpoint does not end Red's investigation.
+After 64 KB of new conversation history, prompt reviews request a fresh public
+progress update and compact older messages into a checkpoint. The original task,
+active skill, observed file paths, findings, Blue assessments, edit records, and
+latest plan remain available, along with the latest complete tool exchange.
+Older source pages must be reread when their details are needed. Checkpoint events
+show the conversation's byte size before and after; this is not a token limit or
+a reduction of the provider's context window. Compaction and retry recovery apply
+within the current run, not across process restarts.
 Tool calls execute after a complete response; interrupted streams cannot execute
 partially received tools. Retries retain completed
 tool results and count toward the shared run limits; they do not restart the

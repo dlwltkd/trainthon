@@ -687,6 +687,10 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
         } else view.currentModel = item;
         break;
       }
+      case "context_checkpoint": {
+        view.activity.push({ kind: "note", id: `context-${event.seq}`, seq: event.seq, ts: event.ts, stage: event.stage, agentRole: event.agentRole, final: false, text: `Context checkpoint · ${Math.ceil(event.bytesBefore / 1024)} → ${Math.ceil(event.bytesAfter / 1024)} KB. Retained the original task, ${event.observedFiles} observed file paths, recorded findings and assessments, the latest plan, and recent tool results. Older source pages can be reread.` });
+        break;
+      }
       case "budget_update": {
         view.usage.tokens = Math.max(view.usage.tokens, event.tokens);
         if (view.usageKnown !== false && event.usageKnown !== undefined) view.usageKnown = event.usageKnown;
