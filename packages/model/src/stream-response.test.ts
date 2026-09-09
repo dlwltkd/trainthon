@@ -26,6 +26,14 @@ function input(signal?: AbortSignal) {
 afterEach(() => { for (const budget of allocated.splice(0)) budget.dispose(); vi.useRealTimers(); });
 
 describe("streamed model turns", () => {
+  it("stops an exhausted-quota stream before dispatching tools or retrying", async () => {
+    const f = input();
+    const model = new MockLanguageModelV2({ doStream: stream([call, { type: "error", error: { error: { code: "insufficient_quota", message: "private account detail" } } }]) });
+    await expect(new SdkRunner(() => model).run(f.run)).rejects.toThrow("provider quota exhausted");
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(f.events)).not.toContain("private account detail");
+  });
   it("buffers fragmented tools, preserves typed tool results and provider metadata, and publishes only execution metadata", async () => {
     const f = input();
     const model = new MockLanguageModelV2({ doStream: [stream([

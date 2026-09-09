@@ -1,6 +1,6 @@
 import type { LanguageModel } from "ai";
 import { withCancellation } from "./budget.js";
-import { ProviderRequestError, providerRequestError } from "./provider-errors.js";
+import { ProviderRequestError, providerStreamError } from "./provider-errors.js";
 
 type ProviderModel = Exclude<LanguageModel, string>;
 type Reply = Awaited<ReturnType<ProviderModel["doGenerate"]>>;
@@ -11,16 +11,6 @@ export interface StreamActivity {
   phase: "receiving" | "tool_input";
   outputChars: number;
   toolName?: string;
-}
-
-function streamError(error: unknown): unknown {
-  const converted = providerRequestError(error);
-  if (converted instanceof ProviderRequestError) return converted;
-  const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-  const transient = ["bad_gateway", "service_unavailable", "server_error", "internal_error", "rate_limit_exceeded", "timeout"];
-  const permanent = ["invalid_api_key", "authentication_error", "invalid_request_error", "insufficient_quota", "model_not_found"];
-  const known = typeof code === "string" && [...transient, ...permanent].includes(code);
-  return new ProviderRequestError(`Model stream failed${known ? ` (${code})` : ""}.`, known && transient.includes(code as string), undefined, undefined, { cause: error });
 }
 
 /** Buffer a complete response before the SDK executes tools; discard it on interruption. */
@@ -45,7 +35,7 @@ export async function generateFromStream(
     for (;;) {
       const { done, value: part } = await withCancellation(reader.read(), params.abortSignal);
       if (done) { closed = true; break; }
-      if (part.type === "error") throw streamError(part.error);
+      if (part.type === "error") throw providerStreamError(part.error);
       if (part.type === "stream-start") { warnings = part.warnings; continue; }
       if (part.type === "response-metadata") { const { type: _type, ...metadata } = part; response = { ...response, ...metadata }; continue; }
       if (part.type === "raw") continue;

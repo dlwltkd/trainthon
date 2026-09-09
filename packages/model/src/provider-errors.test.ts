@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APICallError } from "ai";
-import { ProviderRequestError, providerRequestError } from "./provider-errors.js";
+import { ProviderRequestError, providerRequestError, providerStreamError } from "./provider-errors.js";
 
 const failure = (overrides: Partial<ConstructorParameters<typeof APICallError>[0]> = {}) => new APICallError({
   message: "no error message was provided",
@@ -13,6 +13,24 @@ const failure = (overrides: Partial<ConstructorParameters<typeof APICallError>[0
 afterEach(() => vi.useRealTimers());
 
 describe("provider error diagnostics", () => {
+  it("distinguishes exhausted quota from a retryable HTTP rate limit", () => {
+    const exhausted = providerRequestError(failure({ statusCode: 429, responseBody: JSON.stringify({ error: { code: "insufficient_quota", message: "private account detail" } }) })) as ProviderRequestError;
+    expect(exhausted).toMatchObject({ retryable: false, httpStatus: 429 });
+    expect(exhausted.message).toContain("provider quota exhausted");
+    expect(exhausted.message).not.toContain("private account detail");
+    expect(providerRequestError(failure({ statusCode: 429, responseBody: JSON.stringify({ error: { code: "rate_limit_exceeded" } }) }))).toMatchObject({ retryable: true });
+  });
+
+  it("recognizes nested stream quota and schema errors without persisting arbitrary messages or codes", () => {
+    for (const code of ["insufficient_quota", "context_length_exceeded", "invalid_function_parameters"]) {
+      const error = providerStreamError({ error: { code, message: "private source and account details" } }) as ProviderRequestError;
+      expect(error.retryable).toBe(false);
+      expect(error.message).toContain(code);
+      expect(error.message).not.toContain("private source");
+    }
+    expect(providerStreamError({ code: "secret-provider-code", message: "private source" })).toMatchObject({ message: "Model stream failed.", retryable: false });
+    expect(providerStreamError({ error: { code: "bad_gateway" } })).toMatchObject({ retryable: true });
+  });
   it("distinguishes a provider context rejection without displaying the response body", () => {
     const error = providerRequestError(failure({ statusCode: 400, responseBody: JSON.stringify({ error: { code: "context_length_exceeded", message: "private source" } }) })) as ProviderRequestError;
     expect(error.message).toBe("Model API request failed (HTTP 400; provider context window exceeded).");

@@ -19,10 +19,36 @@ function connectionCode(error: unknown): string | undefined {
   return undefined;
 }
 
-function contextExceeded(body: string | undefined): boolean {
-  if (!body) return false;
-  try { return JSON.parse(body)?.error?.code === "context_length_exceeded"; }
-  catch { return false; }
+const PROVIDER_CODES: Record<string, { diagnosis: string; retryable: boolean }> = {
+  bad_gateway: { diagnosis: "provider gateway unavailable", retryable: true },
+  service_unavailable: { diagnosis: "provider unavailable", retryable: true },
+  server_error: { diagnosis: "provider server error", retryable: true },
+  internal_error: { diagnosis: "provider internal error", retryable: true },
+  rate_limit_exceeded: { diagnosis: "provider rate limit reached", retryable: true },
+  timeout: { diagnosis: "provider timed out", retryable: true },
+  invalid_api_key: { diagnosis: "provider rejected the API key", retryable: false },
+  authentication_error: { diagnosis: "provider authentication failed", retryable: false },
+  invalid_request_error: { diagnosis: "provider rejected the request", retryable: false },
+  insufficient_quota: { diagnosis: "provider quota exhausted", retryable: false },
+  model_not_found: { diagnosis: "provider model unavailable", retryable: false },
+  context_length_exceeded: { diagnosis: "provider context window exceeded", retryable: false },
+  invalid_function_parameters: { diagnosis: "provider rejected a tool schema", retryable: false },
+  invalid_json_schema: { diagnosis: "provider rejected a JSON schema", retryable: false },
+};
+
+function knownProviderCode(value: unknown): { code: string; diagnosis: string; retryable: boolean } | undefined {
+  let current = value;
+  for (let depth = 0; depth < 3 && current && typeof current === "object"; depth++) {
+    const item = current as { code?: unknown; error?: unknown };
+    if (typeof item.code === "string" && Object.hasOwn(PROVIDER_CODES, item.code)) return { code: item.code, ...PROVIDER_CODES[item.code]! };
+    current = item.error;
+  }
+  return undefined;
+}
+
+function responseCode(body: string | undefined) {
+  try { return body ? knownProviderCode(JSON.parse(body)) : undefined; }
+  catch { return undefined; }
 }
 
 export class ProviderRequestError extends Error {
@@ -51,11 +77,19 @@ export function providerRequestError(error: unknown): unknown {
     const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
     if (Number.isFinite(delay) && delay >= 0) retryAfterMs = Math.min(delay, 2_147_483_647);
   }
-  const retryable = status === undefined ? error.isRetryable : status === 408 || status === 429 || status >= 500;
+  const providerCode = responseCode(error.responseBody);
+  const retryable = providerCode?.retryable ?? (status === undefined ? error.isRetryable : status === 408 || status === 429 || status >= 500);
   const code = status === undefined ? connectionCode(error) : undefined;
-  const diagnosis = status === undefined ? `connection error${code ? `: ${code}` : ""}` : `HTTP ${status}${contextExceeded(error.responseBody) ? "; provider context window exceeded" : ""}`;
+  const diagnosis = status === undefined ? `connection error${code ? `: ${code}` : ""}` : `HTTP ${status}${providerCode ? `; ${providerCode.diagnosis}` : ""}`;
   return new ProviderRequestError(
     `Model API request failed (${diagnosis})${safeId ? `; request ID ${safeId}` : ""}.`,
     retryable, retryAfterMs, status, { cause: error },
   );
+}
+
+export function providerStreamError(error: unknown): unknown {
+  const converted = providerRequestError(error);
+  if (converted instanceof ProviderRequestError) return converted;
+  const known = knownProviderCode(error);
+  return new ProviderRequestError(`Model stream failed${known ? ` (${known.code}; ${known.diagnosis})` : ""}.`, known?.retryable ?? false, undefined, undefined, { cause: error });
 }
