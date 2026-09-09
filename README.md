@@ -99,6 +99,12 @@ network access. Only JS/TS/Python application source can change. Local success i
 suite to pass in a fresh copy; it is never reported as `FIXED_VERIFIED`.
 Artifacts are written below `runs/<runId>/` before cleanup.
 
+The CLI streams elapsed-time progress to stderr: repository setup, test starts
+and results, model requests, roles, skills, and tool activity. Long operations
+print a waiting update every 10 seconds. The final summary goes to stdout;
+append `2>progress.log` to save the progress separately. Operation events are
+also persisted in `events.jsonl` for the dashboard and later review.
+
 This slice supports Node projects with one npm or pnpm lockfile, Vitest 4–5,
 and Vite 6.1 or newer, plus Python 3.11 projects with pytest 8–9. Vouch itself
 requires Node 22+, pnpm, Git, and Docker.

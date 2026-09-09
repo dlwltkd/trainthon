@@ -9,6 +9,7 @@ import { parseArgs } from "./args.js";
 import { runDoctor } from "./doctor.js";
 import { parseDoctorOptions } from "./doctor-options.js";
 import { parseRunOptions } from "./run-options.js";
+import { createRunProgress } from "./progress.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const BENCH_DIR = resolve(REPO_ROOT, "bench");
@@ -26,7 +27,11 @@ function costLabel(cost: number | null): string {
 async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
   const options = parseRunOptions(flags);
   const controller = new AbortController();
-  const interrupt = () => controller.abort();
+  const progress = createRunProgress(RUNS_DIR);
+  const interrupt = () => {
+    progress.stop();
+    controller.abort();
+  };
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
   try {
@@ -46,6 +51,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
         seed: options.seed,
         patchPath: options.patchPath ? resolve(options.patchPath) : undefined,
         signal: controller.signal,
+        onEvent: progress.onEvent,
       });
       process.stdout.write(
         `run ${record.runId}\n` +
@@ -78,6 +84,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
       repoRoot: REPO_ROOT,
       benchDir: BENCH_DIR,
       signal: controller.signal,
+      onEvent: progress.onEvent,
     });
     const metrics = record.metrics;
     process.stdout.write(
@@ -90,6 +97,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
     process.exitCode = record.status === "CANCELLED" ? 130 :
       record.status === "FIXED_VERIFIED" || record.status === "NOT_REPRODUCIBLE" ? 0 : 1;
   } finally {
+    progress.stop();
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);
   }
