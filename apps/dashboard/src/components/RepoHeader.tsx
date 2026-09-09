@@ -33,7 +33,7 @@ export function RepoHeader({
       <div className="flex min-w-0 flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="truncate text-[1.25em] font-semibold tracking-tight">{name}</h1>
-          <StatusChip status={view.status} />
+          <StatusChip status={view.status} reason={view.reason} />
           <ModeChip view={view} playback={playback} connection={connection} />
           {view.kind === "local_repository" && <Chip tone="neutral">{repositoryWorkflowLabel(view)}</Chip>}
           {view.condition && (
@@ -78,8 +78,9 @@ export function RepoHeader({
         <Stat icon={<Cpu className="size-3.5" />} label="steps" value={`${view.usage.steps}${budgets ? ` / ${budgets.maxSteps}` : ""}`}>
           {budgets && <Meter value={view.usage.steps} max={budgets.maxSteps} />}
         </Stat>
-        <Stat icon={<Coins className="size-3.5" />} label="tokens" value={formatTokens(view.usage.tokens)} hint={view.endedAt ? formatCost(view.costUsd) : undefined}>
+        <Stat icon={<Coins className="size-3.5" />} label={view.usageKnown === false ? "token estimate" : "run tokens"} value={`${formatTokens(view.usage.tokens)}${budgets ? ` / ${formatTokens(budgets.maxTokens)}` : ""}`} hint={view.usageKnown !== false && view.endedAt ? formatCost(view.costUsd) : undefined}>
           {budgets && <Meter value={view.usage.tokens} max={budgets.maxTokens} />}
+          {view.usageKnown === false && <span className="text-[0.7em] leading-tight text-ink-3" title="Token accounting includes conservative estimates where provider usage was unavailable.">Conservative accounting</span>}
         </Stat>
       </div>
     </div>

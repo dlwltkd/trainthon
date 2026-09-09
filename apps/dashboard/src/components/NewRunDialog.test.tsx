@@ -10,6 +10,7 @@ describe("new repository workflow dialog", () => {
     expect(html).toContain("Task prompt (required)");
     expect(html).toContain("Security report (optional)");
     expect(html).toContain("Review &amp; propose fix");
+    expect(html).toContain("Red identifies source concerns; Blue checks the evidence and proposes a fix.");
     expect(html).toContain("Tests are not run in this workflow");
     expect(html).toContain("Repair with regression");
     expect(html).not.toContain("Existing regression test (required)");

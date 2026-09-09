@@ -22,7 +22,7 @@ import type { AgentRole, EngineState } from "@vouch/protocol";
 import { cn } from "@/lib/cn";
 import {
   STAGE_LABEL,
-  STATUS_LABEL,
+  statusLabel,
   groupActivity,
   roleLabel,
   statusTone,
@@ -135,7 +135,7 @@ function NowCard({ view, now, live }: { view: RunView; now: number; live: boolea
       ) : (
         <div className="mt-1 flex items-center gap-2">
           <Chip tone={tone} dot className="px-2 py-1 text-[0.95em] uppercase tracking-wide">
-            {STATUS_LABEL[view.status]}
+            {statusLabel(view.status, view.reason)}
           </Chip>
           <span className="truncate text-[0.9em] text-ink-2">{view.reason}</span>
         </div>
@@ -240,7 +240,7 @@ function Entry({ entry, view, files, actions, now }: { entry: FeedEntry; view: R
           <button onClick={() => actions.openEvidence()} className="flex w-full flex-col items-start gap-1 text-left">
             <div className="flex flex-wrap items-center gap-2">
               <Chip tone={statusTone(entry.status)} dot className="uppercase tracking-wide">
-                {STATUS_LABEL[entry.status]}
+                {statusLabel(entry.status, entry.reason)}
               </Chip>
               <span className="font-mono text-[0.85em] tabular-nums text-ink-3">{formatDuration(entry.elapsedMs)}</span>
             </div>

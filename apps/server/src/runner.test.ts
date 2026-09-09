@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { DEFAULT_BUDGETS, type HarnessEvent } from "@vouch/protocol";
+import { DEFAULT_BUDGETS, DEFAULT_REPOSITORY_BUDGETS, type HarnessEvent } from "@vouch/protocol";
 import { RunRegistry } from "./registry.js";
 import { startRun, type RepositoryStartRequest, type StartRequest } from "./runner.js";
 
@@ -62,16 +62,16 @@ const review: RepositoryStartRequest = {
 };
 
 describe("repository run launcher", () => {
-  it("starts a prompt-only review without a report, regression, or irrelevant Red configuration", async () => {
+  it("starts Red discovery then Blue review without requiring a report or regression", async () => {
     const { paths, registry } = fixture();
-    vi.stubEnv("VOUCH_RED_PROVIDER", "unused-invalid-provider");
     const execution = holdRun(engine.executeRepositoryReview);
     const run = await startRun(review, paths, registry);
 
     expect(engine.executeRepositoryReview).toHaveBeenCalledWith(expect.objectContaining({
       repoPath: review.repoPath, prompt: review.prompt, report: "", remediate: false,
       model: expect.objectContaining({ model: "gpt-review-fixture", provider: "openai" }), seed: 1,
-      budgets: DEFAULT_BUDGETS, runsDir: paths.runsDir,
+      reviewModel: expect.objectContaining({ model: "glm-review-fixture", provider: "compatible" }),
+      budgets: DEFAULT_REPOSITORY_BUDGETS, runsDir: paths.runsDir,
     }));
     expect(engine.executeLocalRun).not.toHaveBeenCalled();
     expect(sandbox.readBoundedRegularFile).not.toHaveBeenCalled();
@@ -90,6 +90,16 @@ describe("repository run launcher", () => {
     await vi.waitFor(() => expect(run.done).toBe(true));
     expect(registry.activeCount).toBe(0);
     expect(listener).toHaveBeenLastCalledWith(null);
+  });
+
+  it("uses Blue alone only when the caller explicitly disables Red review", async () => {
+    const { paths, registry } = fixture();
+    vi.stubEnv("VOUCH_RED_PROVIDER", "unused-invalid-provider");
+    const execution = holdRun(engine.executeRepositoryReview);
+    const run = await startRun({ ...review, review: false }, paths, registry);
+    expect(engine.executeRepositoryReview).toHaveBeenCalledWith(expect.objectContaining({ reviewModel: undefined }));
+    execution.finish();
+    await vi.waitFor(() => expect(run.done).toBe(true));
   });
 
   it("enables source remediation only for its explicit workflow", async () => {
@@ -154,7 +164,7 @@ describe("repository run launcher", () => {
     expect(options).not.toHaveProperty("reviewRunner");
     expect(options).not.toHaveProperty("repairRunner");
     expect(options).not.toHaveProperty("acquireSource");
-    expect(options.budgets).toEqual(DEFAULT_BUDGETS);
+    expect(options.budgets).toEqual(DEFAULT_REPOSITORY_BUDGETS);
     expect(options.model.model).toBe("gpt-review-fixture");
     expect(injected).not.toHaveBeenCalled();
     execution.finish();

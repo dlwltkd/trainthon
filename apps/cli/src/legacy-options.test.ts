@@ -58,15 +58,15 @@ describe("run CLI options", () => {
     expect(() => parseRunOptions({ ...repository, report: "" })).toThrow("non-empty file path");
   });
 
-  it("configures prompt-based review with only its actual model role", () => {
+  it("configures Red discovery and Blue validation for prompt-based review", () => {
     const options = parseRunOptions({ repo: "../project", prompt: "Review session expiration checks.", ref: "release" }, {
-      VOUCH_RED_PROVIDER: "unused-invalid-provider",
+      VOUCH_RED_MODEL: "glm-review", VOUCH_RED_PROVIDER: "compatible",
     });
     expect(options).toMatchObject({
       kind: "repository", repoPath: "../project", prompt: "Review session expiration checks.",
       mode: "live", ref: "release", seed: 1, model: { model: "gpt-5.6-sol", provider: "openai" },
+      reviewModel: { model: "glm-review", provider: "compatible" },
     });
-    expect(options).not.toHaveProperty("reviewModel");
     expect(options).not.toHaveProperty("regressionPath");
     expect(() => parseRunOptions({ repo: "/tmp/project", prompt: "  " })).toThrow("non-empty review instructions");
     expect(() => parseRunOptions({ ...repository, regression: " " })).toThrow("repository-relative path");
@@ -83,9 +83,10 @@ describe("run CLI options", () => {
   it("rejects unused repair flags and scripted mode for prompt-based review", () => {
     const flags = { repo: "/tmp/project", prompt: "Review input validation." };
     expect(() => parseRunOptions({ ...flags, mode: "scripted" })).toThrow("requires --mode live");
-    for (const flag of ["patch", "red-model", "red-provider", "red-base-url", "red-api-key-env"]) {
-      expect(() => parseRunOptions({ ...flags, [flag]: "unused" })).toThrow("only supported with --regression");
-    }
+    expect(() => parseRunOptions({ ...flags, patch: "unused" })).toThrow("only supported with --regression");
+    expect(parseRunOptions({ ...flags, "red-model": "custom-review", "red-provider": "compatible", "red-base-url": "https://provider.example/v1", "red-api-key-env": "REVIEW_KEY" }, {})).toMatchObject({
+      reviewModel: { model: "custom-review", provider: "compatible", baseURL: "https://provider.example/v1", apiKeyEnv: "REVIEW_KEY" },
+    });
     expect(() => parseRunOptions({ task: "fixture", mode: "scripted", condition: "C", prompt: "Review" }))
       .toThrow("--prompt is only supported with --repo");
   });

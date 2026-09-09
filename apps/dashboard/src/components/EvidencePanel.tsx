@@ -3,7 +3,7 @@ import type { TestRunEvent } from "@vouch/protocol";
 import { ShieldCheck, ShieldAlert, ShieldQuestion, FlaskConical, ScrollText, Scale } from "lucide-react";
 import { api, type RunSource } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { STATUS_LABEL, isRepositoryReview, isRepositoryRemediation, statusDescription, statusTone, type RunView } from "@/lib/derive";
+import { statusLabel, isRepositoryReview, isRepositoryRemediation, statusDescription, statusTone, type RunView } from "@/lib/derive";
 import { formatDuration, stringify } from "@/lib/format";
 import { Source } from "./CodeView";
 import { Chip, Mono, Panel, Spinner } from "./ui";
@@ -14,7 +14,7 @@ export function EvidencePanel({ view, source, focusPhase }: { view: RunView; sou
   const Icon = tone === "pass" ? ShieldCheck : tone === "fail" ? ShieldAlert : ShieldQuestion;
   const sourceReview = isRepositoryReview(view);
   const sourcePatch = isRepositoryRemediation(view);
-  const finalSummary = [...view.activity].reverse().find((item) => item.kind === "note" && item.final);
+  const finalSummary = [...view.activity].reverse().find((item) => item.kind === "note" && item.final && item.agentRole !== "red");
   const scope = sourcePatch ? "source patch · tests not run" : sourceReview ? "source review · model-reported findings" : view.kind === "local_repository" ? "repository tests · no independent grader" : view.grade ? "hidden grader" : "benchmark gate";
 
   return (
@@ -32,12 +32,13 @@ export function EvidencePanel({ view, source, focusPhase }: { view: RunView; sou
         <Icon className={cn("mt-0.5 size-6 shrink-0", tone === "pass" && "text-pass", tone === "fail" && "text-fail", tone === "info" && "text-info", tone === "warn" && "text-warn", (tone === "neutral" || tone === "running") && "text-ink-3")} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[1.15em] font-semibold tracking-tight">{STATUS_LABEL[view.status]}</span>
+            <span className="text-[1.15em] font-semibold tracking-tight">{statusLabel(view.status, view.reason)}</span>
             <Chip tone="neutral" className="secondary">
               scope · {scope}
             </Chip>
           </div>
           <p className="mt-1 text-[0.95em] text-ink-2">{statusDescription(view)}</p>
+          {view.usageKnown === false && <p className="mt-1.5 text-[0.85em] text-ink-3">Token accounting includes a conservative estimate because provider usage was unavailable for at least one response.</p>}
           {view.reason && view.status !== "RUNNING" && (
             <p className="secondary mt-1.5 text-[0.85em] text-ink-3">
               harness: <span className="italic">{view.reason}</span>

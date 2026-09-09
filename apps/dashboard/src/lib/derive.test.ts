@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessEvent } from "@vouch/protocol";
-import { deriveRun, groupActivity, resolveEvidence } from "./derive";
+import { deriveRun, groupActivity, resolveEvidence, statusDescription, statusLabel } from "./derive";
 
 type Payload = HarnessEvent extends infer Event ? Event extends HarnessEvent ? Omit<Event, "runId" | "seq" | "ts"> : never : never;
 
@@ -10,6 +10,56 @@ function trace(...payloads: Payload[]): HarnessEvent[] {
 }
 
 describe("agent activity derivation", () => {
+  it("marks conservative token accounting only after its visible event and keeps uncertainty sticky", () => {
+    const events = trace(
+      { type: "budget_update", tokens: 1234, usageKnown: true, steps: 1, elapsedMs: 1000 },
+      { type: "budget_update", tokens: 2400, usageKnown: false, steps: 2, elapsedMs: 2000 },
+      { type: "budget_update", tokens: 3600, usageKnown: true, steps: 3, elapsedMs: 3000 },
+      { type: "run_end", status: "BUDGET_TIMEOUT", reason: "Run tokens budget exhausted", costUsd: null, elapsedMs: 3000 },
+    );
+    expect(deriveRun(events.slice(0, 1), false)!.usageKnown).toBeUndefined();
+    expect(deriveRun(events.slice(0, 2), false)!.usageKnown).toBe(true);
+    expect(deriveRun(events.slice(0, 3))!.usageKnown).toBe(false);
+    const view = deriveRun(events, true)!;
+    expect(view.usageKnown).toBe(false);
+    expect(statusDescription(view)).toContain("Conservative budget accounting: 3,600 / 5,000 tokens");
+    expect(statusDescription(view)).not.toContain("Recorded model usage");
+  });
+
+  it("uses historical record uncertainty only after the final event is visible", () => {
+    const events = trace(
+      { type: "budget_update", tokens: 1234, steps: 1, elapsedMs: 1000 },
+      { type: "run_end", status: "REVIEW_COMPLETE", costUsd: null, elapsedMs: 1000 },
+    );
+    expect(deriveRun(events.slice(0, 2), false)!.usageKnown).toBeUndefined();
+    expect(deriveRun(events, false)!.usageKnown).toBe(false);
+    expect(deriveRun(events)!.usageKnown).toBeUndefined();
+  });
+
+  it.each([
+    ["Run tokens budget exhausted", "Token budget limit"],
+    ["Next model request exceeds the remaining token allowance: estimated request requires at least 8000 tokens; 3766 remain (1234 used of 5000). No provider request was sent.", "Request too large"],
+    ["Run steps budget exhausted", "Step limit reached"],
+    ["Run wall budget exhausted", "Time limit reached"],
+    [undefined, "Budget limit reached"],
+  ])("labels budget stops from their recorded reason: %s", (reason, label) => {
+    expect(statusLabel("BUDGET_TIMEOUT", reason)).toBe(label);
+  });
+
+  it("separates recorded token usage from request admission and keeps historical reasons intact", () => {
+    const reason = "Run tokens budget exhausted";
+    const view = deriveRun(trace(
+      { type: "budget_update", tokens: 1234, steps: 3, elapsedMs: 1000 },
+      { type: "run_end", status: "BUDGET_TIMEOUT", reason, costUsd: null, elapsedMs: 1000 },
+    ))!;
+    expect(view.reason).toBe(reason);
+    expect(statusDescription(view)).toBe("The harness stopped at its per-run token allowance check. Recorded model usage: 1,234 / 5,000 tokens.");
+    view.reason = "Next model request exceeds the remaining token allowance: estimated request requires at least 8000 tokens; 3766 remain (1234 used of 5000). No provider request was sent.";
+    expect(statusDescription(view)).toContain("The request was not sent.");
+    expect(statusDescription(view)).toContain("1,234 / 5,000 tokens");
+    expect(statusLabel("INFRA_ERROR", "Run tokens budget exhausted")).toBe("Infra error");
+  });
+
   it("distinguishes configured guidance from skill invocation and preserves its stated reason", () => {
     const events = trace(
       { type: "guidance_configured", id: "local-repair", version: "1", agentRole: "blue" },
@@ -91,14 +141,16 @@ describe("agent activity derivation", () => {
     expect(groupActivity(view.activity).some((item) => item.kind === "group")).toBe(false);
   });
 
-  it("keeps finding updates in history and shows the latest record without inferring a fix", () => {
-    const finding: Payload = { type: "finding_reported", findingId: "input-check", title: "Input check needs review", severity: "medium", confidence: "potential", summary: "A source branch may accept an absent value.", recommendation: "Review the default handling.", evidence: ["src/parser.ts"], callId: "finding-call-1", agentRole: "blue", stage: "REVIEW" };
-    const events = trace(finding, { ...finding, confidence: "confirmed", callId: "finding-call-2", summary: "The inspected branch does not supply a default." });
+  it("keeps Red claims and Blue assessments separate without inferring a fix", () => {
+    const finding: Payload = { type: "finding_reported", findingId: "input-check", title: "Input check needs review", severity: "medium", confidence: "potential", summary: "A source branch may accept an absent value.", recommendation: "Review the default handling.", evidence: ["src/parser.ts"], callId: "finding-call-1", agentRole: "red", stage: "REVIEW" };
+    const events = trace(finding, { ...finding, confidence: "confirmed", callId: "finding-call-2", summary: "The inspected branch does not supply a default.", agentRole: "blue" });
     expect(deriveRun(events.slice(0, 1))!.findings).toEqual([]);
     expect(deriveRun(events.slice(0, 2))!.findings[0]!.confidence).toBe("potential");
+    expect(deriveRun(events.slice(0, 2))!.findings[0]!.agentRole).toBe("red");
     const view = deriveRun(events)!;
-    expect(view.findings).toHaveLength(1);
-    expect(view.findings[0]!.confidence).toBe("confirmed");
+    expect(view.findings).toHaveLength(2);
+    expect(view.findings[0]).toMatchObject({ confidence: "potential", agentRole: "red" });
+    expect(view.findings[1]).toMatchObject({ confidence: "confirmed", agentRole: "blue" });
     expect(view.activity.filter((item) => item.kind === "finding")).toHaveLength(2);
     expect(view.tests).toEqual([]);
     expect(view.changedFiles.size).toBe(0);

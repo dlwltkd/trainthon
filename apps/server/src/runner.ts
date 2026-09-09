@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { DEFAULT_BUDGETS, type Condition, type ExecutionMode, type HarnessEvent } from "@vouch/protocol";
+import { DEFAULT_BUDGETS, DEFAULT_REPOSITORY_BUDGETS, type Condition, type ExecutionMode, type HarnessEvent } from "@vouch/protocol";
 import { executeLocalRun, executeRepositoryReview, executeRun, loadTask } from "@vouch/engine";
 import { readBoundedRegularFile } from "@vouch/sandbox";
 import { resolveLiveBlueModel, resolveLiveRoleModels } from "../../cli/src/run-options.js";
@@ -138,7 +138,8 @@ export async function startRun(
   if (workflow !== "repair") {
     if (request.mode !== "live" || request.patchPath || request.regressionPath) throw new Error("prompt-based workflows require live mode without a patch or regression");
     if (!request.prompt?.trim()) throw new Error("a task prompt is required");
-    executeRepositoryReview({ repoPath, ref: request.ref, prompt: request.prompt, report, remediate: workflow === "remediate", model: resolveLiveBlueModel({}, process.env), runsDir: paths.runsDir, budgets: DEFAULT_BUDGETS, seed, signal: controller.signal, onEvent }).then(() => finish(), finish);
+    const models = request.review === false ? { blue: resolveLiveBlueModel({}, process.env), red: undefined } : resolveLiveRoleModels({}, process.env);
+    executeRepositoryReview({ repoPath, ref: request.ref, prompt: request.prompt, report, remediate: workflow === "remediate", model: models.blue, reviewModel: models.red, runsDir: paths.runsDir, budgets: DEFAULT_REPOSITORY_BUDGETS, seed, signal: controller.signal, onEvent }).then(() => finish(), finish);
     return started;
   }
   if (typeof request.regressionPath !== "string" || !request.regressionPath.trim()) throw new Error("regressionPath is required for repair with tests");

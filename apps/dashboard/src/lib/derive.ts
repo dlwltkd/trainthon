@@ -235,6 +235,7 @@ export interface RunView {
   costUsd: number | null;
   budgets?: Budgets;
   usage: { tokens: number; steps: number; elapsedMs: number; modelTurns: number };
+  usageKnown?: boolean;
   repository?: { name: string; url?: string; commit?: string; ref?: string; files: string[] };
   stages: StageView[];
   currentStage: EngineState;
@@ -382,7 +383,7 @@ function countPatch(patch: string): { additions: number; deletions: number } {
   return { additions, deletions };
 }
 
-export function deriveRun(events: HarnessEvent[]): RunView | null {
+export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean): RunView | null {
   if (events.length === 0) return null;
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
   const start = sorted.find((e) => e.type === "run_start");
@@ -507,7 +508,7 @@ export function deriveRun(events: HarnessEvent[]): RunView | null {
       }
       case "finding_reported": {
         const item: FindingItem = { ...event, kind: "finding", id: `finding-${event.seq}` };
-        view.findings = [...view.findings.filter((finding) => finding.findingId !== item.findingId), item];
+        view.findings = [...view.findings.filter((finding) => finding.findingId !== item.findingId || finding.agentRole !== item.agentRole), item];
         view.activity.push(item);
         break;
       }
@@ -633,6 +634,7 @@ export function deriveRun(events: HarnessEvent[]): RunView | null {
       }
       case "budget_update": {
         view.usage.tokens = Math.max(view.usage.tokens, event.tokens);
+        if (view.usageKnown !== false && event.usageKnown !== undefined) view.usageKnown = event.usageKnown;
         view.usage.steps = Math.max(view.usage.steps, event.steps);
         view.usage.elapsedMs = Math.max(view.usage.elapsedMs, event.elapsedMs);
         break;
@@ -663,6 +665,7 @@ export function deriveRun(events: HarnessEvent[]): RunView | null {
     }
   }
 
+  if (view.endedAt !== undefined && view.usageKnown !== false && finalUsageKnown !== undefined) view.usageKnown = finalUsageKnown;
   view.diff = parseUnifiedDiff(view.patch);
   for (const file of view.diff) {
     if (file.generated) continue;
@@ -750,15 +753,38 @@ export const STATUS_LABEL: Record<RunStatus, string> = {
   NOT_REPRODUCIBLE: "Not reproducible",
   FAILED_NO_FIX: "No fix",
   BROKE_FUNCTION: "Broke function",
-  BUDGET_TIMEOUT: "Budget timeout",
+  BUDGET_TIMEOUT: "Budget limit reached",
   CANCELLED: "Cancelled",
   SETUP_ERROR: "Setup error",
   INVALID_REPRODUCTION: "Invalid reproduction",
   INFRA_ERROR: "Infra error",
 };
 
+export function statusLabel(status: RunStatus, reason?: string): string {
+  if (status !== "BUDGET_TIMEOUT") return STATUS_LABEL[status];
+  if (reason?.startsWith("Next model request exceeds the remaining token allowance")) return "Request too large";
+  if (/\btokens?\b/i.test(reason ?? "")) return "Token budget limit";
+  if (/\bsteps?\b/i.test(reason ?? "")) return "Step limit reached";
+  if (/\bwall\b|\btime\b/i.test(reason ?? "")) return "Time limit reached";
+  return STATUS_LABEL[status];
+}
+
 export function statusDescription(view: RunView): string {
   switch (view.status) {
+    case "BUDGET_TIMEOUT": {
+      const label = statusLabel(view.status, view.reason);
+      if (label === "Request too large" || label === "Token budget limit") {
+        const usage = view.usage.tokens.toLocaleString("en-US");
+        const allowance = view.budgets ? ` / ${view.budgets.maxTokens.toLocaleString("en-US")}` : "";
+        const detail = label === "Request too large"
+          ? "The next request's estimated token allowance exceeds this run's remaining limit. The request was not sent."
+          : "The harness stopped at its per-run token allowance check.";
+        return `${detail} ${view.usageKnown === false ? "Conservative budget accounting" : "Recorded model usage"}: ${usage}${allowance} tokens.`;
+      }
+      if (label === "Step limit reached") return "The run reached its configured model step limit.";
+      if (label === "Time limit reached") return "The run reached its configured wall-clock time limit.";
+      return view.reason ?? "The run reached a configured harness limit.";
+    }
     case "PATCH_PROPOSED":
       return "A source patch was proposed from code inspection. Tests were not run. Review the diff and findings before delivery.";
     case "REVIEW_COMPLETE":

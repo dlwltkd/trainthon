@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { loadEnvFile } from "node:process";
-import { DEFAULT_BUDGETS } from "@vouch/protocol";
+import { DEFAULT_BUDGETS, DEFAULT_REPOSITORY_BUDGETS } from "@vouch/protocol";
 import { executeLocalRun, executeRepositoryReview, executeRun, loadTask } from "@vouch/engine";
 import { readBoundedRegularFile } from "@vouch/sandbox";
 import { parseArgs } from "./args.js";
@@ -46,7 +46,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
         ref: options.ref,
         runsDir: RUNS_DIR,
         model: options.model,
-        budgets: DEFAULT_BUDGETS,
+        budgets: options.regressionPath ? DEFAULT_BUDGETS : DEFAULT_REPOSITORY_BUDGETS,
         seed: options.seed,
         signal: controller.signal,
         onEvent: progress.onEvent,
@@ -60,7 +60,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
           reviewModel: options.reviewModel,
           patchPath: options.patchPath ? resolve(options.patchPath) : undefined,
         })
-        : await executeRepositoryReview({ ...common, prompt: options.prompt!, report, remediate: options.remediate });
+        : await executeRepositoryReview({ ...common, prompt: options.prompt!, report, remediate: options.remediate, reviewModel: options.reviewModel });
       process.stdout.write(
         `run ${record.runId}\n` +
         `  repository=${options.repoPath} mode=${options.mode} status=${record.status}\n` +

@@ -138,13 +138,12 @@ export function parseRunOptions(flags: Flags, env: NodeJS.ProcessEnv = process.e
   if (!regressionPath) {
     if (!prompt) throw new Error("--repo requires --prompt <review instructions> or --regression <repository-relative path>");
     if (mode !== "live") throw new Error("prompt-based repository review requires --mode live");
-    for (const key of ["patch", "red-model", "red-provider", "red-base-url", "red-api-key-env"]) {
-      if (flags[key] !== undefined) throw new Error(`--${key} is only supported with --regression`);
-    }
+    if (flags["patch"] !== undefined) throw new Error("--patch is only supported with --regression");
+    const liveModels = resolveLiveRoleModels(flags, env);
     return {
       kind: "repository", repoPath: repoPath!, reportPath, prompt, remediate: flags["fix"] === true,
       ref: value(flags, "ref") ?? "HEAD", mode,
-      model: resolveLiveBlueModel(flags, env), seed,
+      model: liveModels.blue, reviewModel: liveModels.red, seed,
     };
   }
   if (flags["fix"] !== undefined) throw new Error("--fix cannot be combined with --regression; regression runs already permit source repair");

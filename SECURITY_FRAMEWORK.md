@@ -58,9 +58,10 @@ distinction and validate references against their own input artifacts.
 
 The inputs are a local Git path or public GitHub URL and a review prompt, with an
 optional report and ref. The harness pins the commit and prepares a source
-snapshot. A single reviewer can load `source-security-review`,
+snapshot. Red first reviews the source and passes recorded findings to Blue.
+Blue independently checks the source before issuing its assessment. Reviewers can load `source-security-review`,
 `auth-boundary-review`, `config-dependency-review`, and `remediation-planning`.
-It uses read/search tools, structured `report_finding` records, and public progress
+They use paginated read/search tools, structured `report_finding` records, and public progress
 updates. Each finding identifies observed files, severity, confidence, a summary,
 and a defensive recommendation. Confirmed source observations remain distinct
 from potential issues and unverified runtime assumptions. It has no source-edit, shell, project-execution, or
@@ -80,8 +81,9 @@ identity, observed evidence, and trace remain available as artifacts.
 without `--fix` stays read-only. `--report` remains optional; no regression or test
 execution is required in this mode.
 
-The model must record a confirmed finding backed by observed source and activate
-`source-remediation` before using `write_file`. Only application source can
+Blue must read source and record its own confirmed finding, then activate
+`source-remediation` before using `write_file` or `edit_file`. Red's toolset stays
+read-only and its findings never seed Blue's edit permissions. Only application source can
 change; tests, configuration, manifests, lockfiles, setup, and hidden files remain
 protected. After the final edit it must activate `change-validation` and call
 `inspect_diff`. The runtime checks the inspected patch and protected files before

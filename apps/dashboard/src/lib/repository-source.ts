@@ -52,6 +52,6 @@ export function repositoryStartRequest(values: RepositoryFormValues): Extract<St
     ref: values.ref.trim() || "HEAD",
     mode: values.workflow !== "repair" ? "live" : values.mode,
     ...(values.workflow === "repair" && values.mode === "scripted" ? { patchPath: values.patchPath.trim() } : {}),
-    ...(values.workflow === "repair" ? { review: values.review } : {}),
+    review: values.workflow === "repair" ? values.review : true,
   };
 }

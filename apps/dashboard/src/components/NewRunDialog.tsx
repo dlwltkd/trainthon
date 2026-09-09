@@ -42,6 +42,9 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
   const task = tasks.find((t) => t.id === taskId);
   const live = health && "blue" in health.live ? health.live : null;
   const liveError = health && "error" in health.live ? health.live.error : null;
+  const usesLiveModels = workflow !== "repair" || mode === "live";
+  const usesRed = workflow !== "repair" || review;
+  const modelsReady = !usesLiveModels || Boolean(live?.blue.keyPresent && (!usesRed || live.red.keyPresent));
   const sourceError = repositoryInputError(repositorySource, repoPath);
   const repositoryReady = Boolean(repoPath.trim() && !sourceError && (workflow !== "repair" ? prompt.trim() : regressionPath.trim() && (mode !== "scripted" || patchPath.trim())));
   const workflowTitle = workflow === "remediate" ? "Review & propose fix" : workflow === "review" ? "Repository review" : "Repair with regression";
@@ -69,7 +72,7 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
           <div>
             <div className="text-[1.1em] font-semibold tracking-tight">{kind === "repository" ? workflowTitle : "Benchmark run"}</div>
-            <div className="text-[0.85em] text-ink-3">{kind === "repository" ? workflow === "remediate" ? "Inspect source, report findings, and propose a patch for you to review." : workflow === "review" ? "Give the agent a source review task and follow its findings with evidence." : "Follow an existing regression test, apply a bounded repair, and check the evidence." : "Inspect a recorded fixture workflow with the same activity trace."}</div>
+            <div className="text-[0.85em] text-ink-3">{kind === "repository" ? workflow === "remediate" ? "Red identifies source concerns; Blue checks the evidence and proposes a fix." : workflow === "review" ? "Red reviews source; Blue independently assesses the findings." : "Follow an existing regression test, apply a bounded repair, and check the evidence." : "Inspect a recorded fixture workflow with the same activity trace."}</div>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="close">
             <X className="size-4" />
@@ -162,12 +165,14 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
                   </div>
                   {live ? (
                     <>
-                      <ModelLine role="Blue" model={live.blue} />
                       {workflow === "repair" && <label className="flex items-center gap-2 text-ink-2">
                         <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} className="accent-ink" />
                         Red reviews the evidence first (read-only)
                       </label>}
-                      {workflow === "repair" && review && <ModelLine role="Red" model={live.red} />}
+                      {usesRed && <ModelLine role="Red" model={live.red} />}
+                      <ModelLine role="Blue" model={live.blue} />
+                      {workflow !== "repair" && <span className="text-ink-3">Red: read-only source discovery → Blue: independent source review{workflow === "remediate" ? " and patch" : ""}.</span>}
+                      {!modelsReady && <span className="text-fail">Set the missing model API keys in the server environment before starting.</span>}
                     </>
                   ) : (
                     <span className="text-fail">{liveError ?? "server unavailable"}</span>
@@ -187,7 +192,7 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={submit} disabled={busy || (kind === "bench" ? !taskId : !repositoryReady)}>
+          <Button variant="primary" onClick={submit} disabled={busy || (kind === "bench" ? !taskId : !repositoryReady || !modelsReady)}>
             {busy ? <Spinner className="size-3.5" /> : null}
             Start run
           </Button>

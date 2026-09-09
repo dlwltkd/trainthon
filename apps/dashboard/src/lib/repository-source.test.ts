@@ -9,12 +9,12 @@ describe("repository sources and workflow requests", () => {
     expect(request).toMatchObject({ kind: "repository", workflow: "review", repoPath: form.repoPath, prompt: form.prompt, mode: "live" });
     expect(request).not.toHaveProperty("reportText");
     expect(request).not.toHaveProperty("regressionPath");
-    expect(request).not.toHaveProperty("review");
+    expect(request.review).toBe(true);
   });
 
   it("starts a remediation from a prompt without adding test or delivery operations", () => {
-    const request = repositoryStartRequest({ ...form, workflow: "remediate", mode: "scripted", patchPath: "/tmp/old.diff" });
-    expect(request).toMatchObject({ workflow: "remediate", prompt: form.prompt, mode: "live" });
+    const request = repositoryStartRequest({ ...form, workflow: "remediate", mode: "scripted", patchPath: "/tmp/old.diff", review: false });
+    expect(request).toMatchObject({ workflow: "remediate", prompt: form.prompt, mode: "live", review: true });
     expect(request).not.toHaveProperty("regressionPath");
     expect(request).not.toHaveProperty("patchPath");
     expect(request).not.toHaveProperty("pullRequest");

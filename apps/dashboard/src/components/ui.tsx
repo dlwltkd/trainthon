@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import type { AgentRole, RunStatus } from "@vouch/protocol";
 import { cn } from "@/lib/cn";
-import { STATUS_LABEL, roleLabel, statusTone } from "@/lib/derive";
+import { statusLabel, roleLabel, statusTone } from "@/lib/derive";
 
 export type Tone = "pass" | "fail" | "info" | "warn" | "neutral" | "running" | "red" | "blue";
 
@@ -32,10 +32,10 @@ export function Chip({ tone = "neutral", className, children, dot, ...rest }: HT
   );
 }
 
-export function StatusChip({ status, className }: { status: RunStatus; className?: string }) {
+export function StatusChip({ status, reason, className }: { status: RunStatus; reason?: string; className?: string }) {
   return (
     <Chip tone={statusTone(status)} dot className={cn("uppercase tracking-wide", className)}>
-      {STATUS_LABEL[status]}
+      {statusLabel(status, reason)}
     </Chip>
   );
 }

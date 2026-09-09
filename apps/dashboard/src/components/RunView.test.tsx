@@ -6,6 +6,8 @@ import { deriveRun } from "../lib/derive";
 import { RunView } from "./RunView";
 import { EvidencePanel } from "./EvidencePanel";
 import { RepoHeader } from "./RepoHeader";
+import { AgentIntent } from "./AgentActivity";
+import { FindingsPanel } from "./FindingsPanel";
 
 const state = vi.hoisted(() => ({ run: null as RunController | null }));
 vi.mock("@/hooks/useRun", () => ({ useRun: () => state.run }));
@@ -26,6 +28,48 @@ function controller(events: HarnessEvent[], overrides: Partial<RunController> = 
 }
 
 describe("run view agent trace integration", () => {
+  it("labels conservative budget accounting without presenting it as reported token use", () => {
+    const view = deriveRun(trace(
+      { type: "budget_update", tokens: 1234, usageKnown: false, steps: 3, elapsedMs: 1000 },
+      { type: "run_end", status: "BUDGET_TIMEOUT", reason: "Run tokens budget exhausted", costUsd: null, elapsedMs: 1000 },
+    ))!;
+    const header = renderToStaticMarkup(<RepoHeader view={view} source={null} now={1000} connection="recorded" playback="recorded" />);
+    expect(header).toContain("token estimate");
+    expect(header).toContain("Conservative accounting");
+    const evidence = renderToStaticMarkup(<EvidencePanel view={view} source={null} focusPhase={null} />);
+    expect(evidence).toContain("Conservative budget accounting: 1,234 / 5,000 tokens");
+    expect(evidence).toContain("provider usage was unavailable");
+    expect(evidence).not.toContain("Recorded model usage");
+  });
+
+  it("shows Red claims and Blue assessments as separate role-labeled reports", () => {
+    const finding: Payload = { type: "finding_reported", findingId: "default-value", title: "Default input needs review", severity: "medium", confidence: "confirmed", summary: "A missing input follows an unexpected branch.", recommendation: "Supply an explicit default value.", evidence: ["calc.py"], callId: "finding-red", agentRole: "red", stage: "REVIEW" };
+    const view = deriveRun(trace(finding, { ...finding, callId: "finding-blue", agentRole: "blue", summary: "Blue checked the default branch independently." }))!;
+    const html = renderToStaticMarkup(<FindingsPanel view={view} files={["calc.py"]} onEvidence={() => undefined} />);
+    expect(html).toContain("1 Red claim");
+    expect(html).toContain("1 Blue assessment");
+    expect(html).toContain("Source-supported claim");
+    expect(html).toContain("Confirmed in source");
+    expect(html).toContain("A missing input follows an unexpected branch.");
+    expect(html).toContain("Blue checked the default branch independently.");
+  });
+
+  it("shows a token budget stop with recorded usage instead of labeling it a timeout", () => {
+    const events = trace(
+      { type: "budget_update", tokens: 1234, steps: 3, elapsedMs: 1000 },
+      { type: "run_end", status: "BUDGET_TIMEOUT", reason: "Run tokens budget exhausted", costUsd: null, elapsedMs: 1000 },
+    );
+    state.run = controller(events);
+    const html = renderToStaticMarkup(<RunView runId="run-1" />);
+    expect(html).toContain("Token budget limit");
+    expect(html).toContain("run tokens");
+    expect(html).toContain("1.2k / 5.0k");
+    expect(html).not.toContain("Budget timeout");
+    const evidence = renderToStaticMarkup(<EvidencePanel view={state.run.view!} source={state.run.source} focusPhase={null} />);
+    expect(evidence).toContain("per-run token allowance check");
+    expect(evidence).toContain("1,234 / 5,000 tokens");
+  });
+
   it("renders the current plan, actual skill calls and decision evidence in the connected layout", () => {
     state.run = controller(trace(
       { type: "skill_call", skillId: "bounded-source-repair", version: "1.2", reason: "Existing tests point to a small source correction.", callId: "skill-1", agentRole: "blue", stage: "PATCH" },
@@ -87,6 +131,19 @@ describe("run view agent trace integration", () => {
     expect(evidence).not.toContain("Before / after test evidence");
     expect(evidence).not.toContain(">Gates<");
     expect(evidence).not.toContain("Independent grade");
+  });
+
+  it("keeps Red handoff notes separate from Blue's final review and patch summary", () => {
+    const events = trace({ type: "agent_summary", agentRole: "red", stage: "REVIEW", summary: "Red found a branch for Blue to inspect." });
+    const start = events[0]!;
+    if (start.type === "run_start") start.workflow = "repository_remediation";
+    const view = deriveRun(events)!;
+    const intent = renderToStaticMarkup(<AgentIntent view={view} files={[]} onEvidence={() => undefined} />);
+    const evidence = renderToStaticMarkup(<EvidencePanel view={view} source={null} focusPhase={null} />);
+    expect(intent).not.toContain("Review &amp; patch notes");
+    expect(evidence).toContain("A final summary has not been recorded.");
+    expect(evidence).not.toContain("Red found a branch");
+    expect(view.activity.some((item) => item.kind === "note" && item.agentRole === "red" && item.text === "Red found a branch for Blue to inspect.")).toBe(true);
   });
 
   it("links only canonical GitHub origins and the exact recorded commit", () => {

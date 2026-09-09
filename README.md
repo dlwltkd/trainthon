@@ -109,10 +109,11 @@ pnpm cli run \
 ```
 
 For live runs, copy the environment template and add the provider keys locally.
-Source review uses the Blue model, defaulting to `gpt-5.6-sol` through OpenAI.
-Regression repair also uses a Red evidence reviewer, defaulting to
-`glm-5.3-flash-uncensored` through Routeway. A source review only needs its Blue
-provider key; the live doctor command probes both configured roles:
+Prompt workflows start with Red source discovery, defaulting to
+`glm-5.3-flash-uncensored` through Routeway. Blue, defaulting to `gpt-5.6-sol`
+through OpenAI, independently checks the reported source evidence and proposes
+changes when `--fix` is selected. Configure both provider keys; the live doctor
+command probes both roles:
 
 ```bash
 install -m 600 .env.example .env
@@ -162,12 +163,27 @@ pnpm cli run \
   --mode live
 ```
 
-The agent must record findings backed by observed source before editing. Only
+Blue must read the source and record its own confirmed findings before editing;
+Red's findings alone do not authorize a change. Only
 application source may change, and the final diff must be inspected with protected
 files unchanged. A completed candidate is `PATCH_PROPOSED` with scope
 `source_patch` and `testsRun: false`: it has not passed tests or runtime
 verification. Review the findings and diff before using the patch. This mode
 still requires no test suite, dependency installation, or Docker.
+
+File reads and searches return bounded pages with continuation positions. Large
+files can be changed through an exact, unique `edit_file` replacement instead of
+rewriting their full contents. Prompt workflows allow 500,000 cumulative
+input/output tokens across both roles, including conservative accounting when
+a gateway omits usage. Red is asked to finish its investigation after 30% of that
+allowance or eight model steps, then make a final handoff within the shared cap.
+This leaves capacity for Blue; the handoff must disclose unread source and
+unresolved questions. Existing-test and benchmark workflows retain their
+200,000-token default. Before each model request, the harness
+also reserves a conservative allowance for its context and output. A request
+can exceed that allowance while recorded usage remains below the limit; this is
+reported as a request-size limit, separately from time or step limits. It does
+not indicate the provider account's balance.
 
 To repair against an existing regression, provide `--regression`. Both `--report`
 and a supplemental `--prompt` are optional; `--fix` cannot be combined with this

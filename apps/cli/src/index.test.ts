@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_BUDGETS, type HarnessEvent } from "@vouch/protocol";
+import { DEFAULT_BUDGETS, DEFAULT_REPOSITORY_BUDGETS, type HarnessEvent } from "@vouch/protocol";
 
 const engine = vi.hoisted(() => ({
   executeLocalRun: vi.fn(),
@@ -48,6 +48,8 @@ describe("run CLI result", () => {
 
       expect(engine.executeRepositoryReview).toHaveBeenCalledWith(expect.objectContaining({
         repoPath: repo, prompt: "Review authorization checks.", report: undefined, ref: "HEAD",
+        reviewModel: expect.objectContaining({ provider: "compatible", model: expect.any(String) }),
+        budgets: DEFAULT_REPOSITORY_BUDGETS,
       }));
       expect(engine.executeLocalRun).not.toHaveBeenCalled();
       expect(sandbox.readBoundedRegularFile).not.toHaveBeenCalled();

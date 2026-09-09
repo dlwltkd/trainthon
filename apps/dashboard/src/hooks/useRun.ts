@@ -111,12 +111,13 @@ export function useRun(runId: string | null): RunController {
   }, [state.playback, state.replay.playing, state.replay.cursor, state.replay.speed, state.events]);
 
   const view = useMemo(() => {
-    const derived = deriveRun(replayEvents);
+    const finalUsageKnown = state.payload?.record?.usageKnown;
+    const derived = deriveRun(replayEvents, typeof finalUsageKnown === "boolean" ? finalUsageKnown : undefined);
     if (!derived) return null;
     const workflow = state.payload?.source.workflow ?? state.payload?.record?.workflow;
     if (!derived.workflow && (workflow === "repository_review" || workflow === "repository_repair" || workflow === "repository_remediation")) derived.workflow = workflow;
     return derived;
-  }, [replayEvents, state.payload?.source.workflow, state.payload?.record?.workflow]);
+  }, [replayEvents, state.payload?.source.workflow, state.payload?.record?.workflow, state.payload?.record?.usageKnown]);
 
   return {
     view,

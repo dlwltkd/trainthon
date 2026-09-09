@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowRight, Check, ChevronDown, Circle, FileCode2, GitBranch, ListChecks, MessageSquareText, Play, Puzzle, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { groupActivity, isRepositoryReview, isRepositoryRemediation, roleLabel, STAGE_LABEL, type EvidenceTarget, type ActivityItem, type DecisionItem, type RunView, type SkillItem, type ToolCallItem } from "@/lib/derive";
+import { groupActivity, isRepositoryReview, isRepositoryRemediation, roleLabel, statusLabel, STAGE_LABEL, type EvidenceTarget, type ActivityItem, type DecisionItem, type RunView, type SkillItem, type ToolCallItem } from "@/lib/derive";
 import { formatClock, formatDuration, stringify } from "@/lib/format";
 import { Button, Chip, Empty, Mono, Panel, PanelHeader, RoleChip, Spinner } from "./ui";
 import { EvidenceLinks } from "./EvidenceLinks";
@@ -16,7 +16,7 @@ export function AgentIntent({ view, files, onEvidence }: { view: RunView; files:
   const latestNote = [...view.activity].reverse().find((item) => item.kind === "note" && !item.final);
   const active = view.status === "RUNNING";
   const sourcePatch = isRepositoryRemediation(view);
-  const findings = (isRepositoryReview(view) || isRepositoryRemediation(view)) ? [...view.activity].reverse().find((item) => item.kind === "note" && item.final) : undefined;
+  const findings = (isRepositoryReview(view) || isRepositoryRemediation(view)) ? [...view.activity].reverse().find((item) => item.kind === "note" && item.final && item.agentRole !== "red") : undefined;
   return <div className="flex flex-col gap-3">
     {findings?.kind === "note" && <Panel className="overflow-hidden"><PanelHeader title={<><MessageSquareText className="size-3.5" /> {sourcePatch ? "Review & patch notes" : "Review findings"}</>} aside={<Chip tone={sourcePatch ? "warn" : "info"}>{sourcePatch ? "Source patch · untested" : "Source review"}</Chip>} /><MarkdownSummary text={findings.text} className="p-4 text-[0.94em] text-ink-2" /></Panel>}
     <Panel className="overflow-hidden">
@@ -77,7 +77,7 @@ function ActivityCard({ item, view, files, onEvidence }: { item: ActivityItem; v
   if (item.kind === "note") return <div className="flex gap-2 px-1"><MessageSquareText className="mt-0.5 size-3.5 shrink-0 text-ink-3" /><div><div className="mb-1 flex items-center gap-2"><span className="text-[0.78em] font-medium text-ink-3">{item.agentRole ? `${roleLabel(item.agentRole)} ${item.final ? "summary" : "update"}` : "Harness"}</span><span className="font-mono text-[0.72em] text-ink-3">{formatClock(item.ts - view.startedAt)}</span></div>{item.final ? <MarkdownSummary text={item.text} className="text-[0.9em] text-ink-2" /> : <p className="whitespace-pre-wrap text-[0.9em] leading-relaxed text-ink-2">{item.text}</p>}</div></div>;
   if (item.kind === "change") return <button onClick={() => onEvidence({ kind: "file", value: item.path })} className="flex w-full items-center gap-2 rounded-lg border border-line p-3 text-left"><FileCode2 className="size-3.5 text-blue-role" /><Mono className="min-w-0 flex-1 truncate">{item.path}</Mono><span className="font-mono text-[0.8em] text-pass">+{item.additions}</span><span className="font-mono text-[0.8em] text-fail">−{item.deletions}</span></button>;
   if (item.kind === "check") return <div className={cn("rounded-lg border p-3", item.status === "failed" ? "border-fail/25 bg-fail-soft/30" : item.status === "passed" ? "border-pass/25 bg-pass-soft/30" : "border-line bg-canvas/40")}><div className="flex items-start gap-2"><span className="mt-0.5">{item.status === "failed" ? <X className="size-3.5 text-fail" /> : item.status === "passed" ? <Check className="size-3.5 text-pass" /> : <ListChecks className="size-3.5 text-info" />}</span><div className="min-w-0 flex-1"><p className="text-[0.9em] font-medium">{item.label}</p>{item.detail && <p className="mt-1 text-[0.82em] text-ink-2">{item.detail}</p>}{item.test && <button className="mt-2 text-[0.8em] font-medium text-info hover:underline" onClick={() => onEvidence({ kind: "test", value: item.test!.phase })}>Open test evidence →</button>}</div>{item.durationMs !== undefined && <Mono className="text-[0.78em] text-ink-3">{formatDuration(item.durationMs)}</Mono>}</div></div>;
-  if (item.kind === "end") return <div className="rounded-lg border border-line bg-canvas p-3"><div className="mb-1 text-[0.8em] font-semibold uppercase tracking-wide text-ink-3">Run finished · {formatDuration(item.elapsedMs)}</div><p className="text-[0.92em] font-medium">{item.status.replace(/_/g, " ")}</p>{item.reason && <p className="mt-1 text-[0.85em] text-ink-2">{item.reason}</p>}</div>;
+  if (item.kind === "end") return <div className="rounded-lg border border-line bg-canvas p-3"><div className="mb-1 text-[0.8em] font-semibold uppercase tracking-wide text-ink-3">Run finished · {formatDuration(item.elapsedMs)}</div><p className="text-[0.92em] font-medium">{statusLabel(item.status, item.reason)}</p>{item.reason && <p className="mt-1 text-[0.85em] text-ink-2">{item.reason}</p>}</div>;
   return <details className="rounded-lg border border-line p-3"><summary className="cursor-pointer text-[0.9em]">Recorded grade</summary><pre className="code mt-2 overflow-auto">{stringify(item.metrics)}</pre></details>;
 }
 

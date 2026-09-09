@@ -112,6 +112,8 @@ describe("local observer HTTP API", () => {
     writeFileSync(join(dir, "repository.json"), JSON.stringify({ url, sourcePath: repo, sourceSnapshot: "source" }));
     writeFileSync(join(dir, "record.json"), JSON.stringify({ workflow: "repository_review", verification: { scope: "source_review", independentGrader: false } }));
     writeFileSync(join(dir, "prompt.txt"), "Review source access boundaries.");
+    writeFileSync(join(dir, "red-review-summary.txt"), "Source observations for independent Blue review.");
+    writeFileSync(join(dir, "red-review-handoff.json"), '{"testsRun":false,"findings":[]}');
     rmSync(join(dir, "regression.ts"));
     mkdirSync(join(dir, "source", "src"), { recursive: true });
     writeFileSync(join(dir, "source", "src", "index.ts"), "export const fromSnapshot = true;\n");
@@ -142,6 +144,9 @@ describe("local observer HTTP API", () => {
     expect(execFileSync).not.toHaveBeenCalled();
     const prompt = await (await request("/api/runs/run-1/artifact?name=prompt.txt")).json();
     expect(prompt).toMatchObject({ name: "prompt.txt", text: "Review source access boundaries." });
+    for (const name of ["red-review-summary.txt", "red-review-handoff.json"]) {
+      expect((await request(`/api/runs/run-1/artifact?name=${name}`)).status).toBe(200);
+    }
   });
 
   it("reports GitHub token presence without returning token values", async () => {
