@@ -56,10 +56,31 @@ pnpm cli run \
   --patch ./candidate.diff
 ```
 
-Use `--mode live` with an explicit model/provider and its API key to let the
-repair agent edit source. The optional `VOUCH_RED_*` Routeway settings enable a
-read-only GLM evidence review before Blue repairs the code. The compatible-provider
-path has mock coverage; a live Routeway smoke test still requires an API key.
+For a live repair, copy the environment template, choose an exact Blue coding
+model, and add the provider keys locally:
+
+```bash
+cp .env.example .env
+# Edit .env, then validate both provider connections.
+pnpm cli doctor
+```
+
+`.env` is ignored by Git. Vouch accepts key-environment names rather than raw
+key flags, and it does not print key values in configuration or run logs. The
+Routeway Red role uses read-only tools to review evidence before Blue repairs
+the code. Its adapter sends `max_completion_tokens` and omits `seed`, which this
+exact GLM model does not advertise as supported. The adapter and connection
+check are implemented; a real provider smoke needs valid credentials.
+
+Run the repair with the provider configuration loaded from `.env`:
+
+```bash
+pnpm cli run \
+  --repo /path/to/project \
+  --report ./report.md \
+  --regression tests/security.test.ts \
+  --mode live
+```
 
 Local runs snapshot the requested commit, overlay the supplied regression,
 install the project's locked dependencies in Docker, and run tests without
