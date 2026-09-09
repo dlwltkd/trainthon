@@ -6,8 +6,12 @@
   "packageManager": "pnpm@10.33.3",
   "scripts": {
     "cli": "tsx apps/cli/src/index.ts",
+    "dev": "pnpm run --parallel \"/^dev:/\"",
+    "dev:server": "pnpm --filter @vouch/server dev",
+    "dev:dashboard": "pnpm --filter @vouch/dashboard dev",
+    "build:dashboard": "pnpm --filter @vouch/dashboard build",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @vouch/dashboard typecheck"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",

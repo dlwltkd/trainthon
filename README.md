@@ -1,35 +1,54 @@
 # Vouch
 
-**Security repair with reviewable test evidence.**
+**A common agent framework for security work.**
 
-Vouch is a CLI harness that takes a security report and a regression test for a local
-Git repository, prepares a candidate patch, and records its before/after test results.
-The implemented MVP exports the patch, test evidence, and agent activity for review.
-The repository UI, GitHub connection, QR audience flow, and draft PR creation are planned.
+Vouch brings model execution, skills, bounded tools, public activity, and
+reviewable evidence into one structure for defensive security workflows. Local
+repository repair is the first implemented workflow: it takes a supplied security
+report and regression test, prepares a candidate patch when the test fails, and
+records the before/after results.
+
+Its CLI and local dashboard show the repository alongside actual skill calls,
+public decision summaries, plans, tools, and test evidence. Code review,
+configuration review, dependency review, and incident-artifact review are planned
+workflows. GitHub connection, the QR audience flow, benchmark comparisons, and
+draft PR creation also remain planned.
 
 ## Why Vouch
 
-- **Before/after evidence** — preserve the supplied regression and functional test
-  inventories, then run them against the candidate in a fresh snapshot.
-- **Bounded repair** — allow application-source edits within shared model, step, and
-  time budgets. Stop without a patch when the supplied regression does not reproduce.
+- **Shared execution** — keep model configuration, budgets, skill calls, public
+  decisions, and tool results in a consistent run history.
+- **Bounded tools** — enforce each role's capabilities in the harness. In the
+  repair workflow, only application source can change; tests and configuration
+  stay protected.
+- **Evidence for the result** — the repair workflow preserves the supplied test
+  inventories and verifies candidates in a fresh snapshot. It stops without a
+  patch when the supplied regression already passes.
 - **Reviewable runs** — retain the diff, structured test results, model configuration,
-  usage, and correlated tool events after cleanup.
+  usage, and correlated tool events after cleanup. Watch a running CLI session in
+  the dashboard or replay its recorded events.
 
 The planned benchmark compares models with and without the harness. No measured
 security-performance improvement is claimed yet.
 
 ## How it's built
 
-Three layers, three packages, so the benchmark can toggle them cleanly:
+The framework builds on the existing packages:
 
-- `packages/skills` — security prompts, tool descriptions, checklists (the SKILL layer)
-- `packages/engine` — state machine, Red/Blue orchestration, budgets, completion gate (the HARNESS layer)
-- `packages/sandbox` — isolated worktree, test execution (the SANDBOX layer)
+- `packages/model` — provider adapters and model/tool execution
+- `packages/protocol` — shared run, tool, skill, and public progress events
+- `packages/skills` — versioned defensive skills and role guidance
+- `packages/engine` — workflow orchestration, budgets, tool boundaries, and result gates
+- `packages/sandbox` — isolated workspaces and test execution
 
-The engine has local-repository and prepared-benchmark entry points. Studio and Bench
-interfaces are planned.
+The engine has local-repository and prepared-benchmark entry points.
+`apps/server` provides the local Hono API and SSE event stream; `apps/dashboard`
+provides the React/Vite repository and activity view. The Bench comparison
+interface remains planned.
 
+See [`SECURITY_FRAMEWORK.md`](./SECURITY_FRAMEWORK.md) for the shared architecture
+contract and the boundary between the framework and each workflow. The current
+entry points are explicit; a general workflow registry has not been implemented.
 See [`HARNESS_PLAN.md`](./HARNESS_PLAN.md) for the full build spec, benchmark protocol, and milestones.
 See [`HACKATHON_MVP.md`](./HACKATHON_MVP.md) for the proposed hackathon scope,
 QR audience checks on participants' existing GitHub projects, Routeway Red
@@ -43,6 +62,28 @@ pnpm typecheck
 pnpm test
 pnpm cli run --task proto-pollution --condition C --mode scripted
 ```
+
+Start the dashboard and API together:
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:5173](http://localhost:5173). Start a local repository run
+from the form, or open a run started by the CLI. The dashboard follows new events
+from `runs/` and offers labeled replay with pause, seek, and speed controls for
+completed runs. The development server proxies API requests to `127.0.0.1:8787`.
+
+For a built dashboard served by the local API:
+
+```bash
+pnpm build:dashboard
+pnpm --filter @vouch/server start
+```
+
+Open [http://127.0.0.1:8787](http://127.0.0.1:8787). Provider keys are loaded by the
+server from the root `.env`; the browser receives configuration and key-presence
+status, never the keys. `pnpm typecheck` checks both the harness and dashboard.
 
 The repository MVP accepts a local Git repository, a report, and a designated
 Vitest or pytest regression. Scripted mode is useful for a deterministic rehearsal:
@@ -100,10 +141,26 @@ suite to pass in a fresh copy; it is never reported as `FIXED_VERIFIED`.
 Artifacts are written below `runs/<runId>/` before cleanup.
 
 The CLI streams elapsed-time progress to stderr: repository setup, test starts
-and results, model requests, roles, skills, and tool activity. Long operations
-print a waiting update every 10 seconds. The final summary goes to stdout;
+and results, model requests, roles, skill calls, public decisions, and tool activity.
+Long operations print a waiting update every 10 seconds. The final summary goes to stdout;
 append `2>progress.log` to save the progress separately. Operation events are
 also persisted in `events.jsonl` for the dashboard and later review.
+
+Local agents call `use_skill` to load `evidence-review`, `minimal-repair`, or
+`regression-verification`, subject to their role. The harness requires an actual
+skill call and a `report_progress` plan before repository tools become available.
+Decision summaries include a next action, up to six plan steps, and evidence
+paths drawn from the supplied test, read/search results, or successful source edits.
+The dashboard renders the resulting `skill_call`, `agent_update`, and correlated
+tool events; it does not expose hidden reasoning or invent missing activity.
+When the baseline regression already passes, it explicitly shows that no model
+was invoked.
+
+The repository pane links inspected files, proposed diffs, and test results.
+New local runs save their source path in the private `repository.json` artifact
+so file previews can read the checked commit while the repository remains
+available. Older runs may have no source path; their recorded activity and
+evidence remain viewable without fabricated file contents.
 
 This slice supports Node projects with one npm or pnpm lockfile, Vitest 4–5,
 and Vite 6.1 or newer, plus Python 3.11 projects with pytest 8–9. Vouch itself

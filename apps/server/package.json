@@ -1,0 +1,18 @@
+{
+  "name": "@vouch/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@vouch/engine": "workspace:*",
+    "@vouch/model": "workspace:*",
+    "@vouch/protocol": "workspace:*",
+    "@vouch/sandbox": "workspace:*",
+    "hono": "^4.13.7"
+  }
+}

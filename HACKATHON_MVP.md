@@ -1,13 +1,26 @@
 # Vouch hackathon MVP
 
-Proposed build scope, based on the current CLI harness. This narrows the broader
-[HARNESS_PLAN.md](./HARNESS_PLAN.md); the benchmark below has not been run.
-The local CLI slice is implemented. The UI, QR flow, GitHub integration, and draft
-PR creation described below remain planned.
+Hackathon scope for Vouch as a common security-agent framework, with local
+repository repair as its first implemented workflow. The shared architecture is
+defined in [SECURITY_FRAMEWORK.md](./SECURITY_FRAMEWORK.md). This demo narrows the
+broader [HARNESS_PLAN.md](./HARNESS_PLAN.md); the benchmark below has not been run.
+The local CLI, repository dashboard, and Hono/SSE server are implemented. The
+dashboard shows real skill calls, public decision summaries, plans, tools, and
+test evidence, including live CLI runs and labeled replay. The QR flow, GitHub
+integration, draft PR creation, and Bench comparisons described below remain
+planned.
 
-**Pitch:** Vouch turns a security report and regression test into a candidate patch
-and reviewable before/after evidence. A planned paired benchmark will measure
-whether the harness improves the same model's security repair performance.
+**Pitch:** Vouch gives defensive security agents a common execution structure:
+skills, bounded tools, visible decisions, and evidence for their results. The first
+workflow turns a security report and existing regression test into a candidate
+patch with before/after evidence. A planned paired benchmark will measure whether
+the harness improves the same model's security repair performance.
+
+New workflows should reuse that execution and viewing structure while defining
+their own inputs, roles, tool permissions, stages, and verification scope. Code
+review, configuration review, dependency review, and incident-artifact review
+remain planned; the current repair roles and test-based verdicts do not define
+the whole framework.
 
 ## Product: Run, Bench, and a QR audience experience
 
@@ -44,7 +57,10 @@ Provide a visibly labeled replay of a saved run for presentation timing. Reserve
 
 The UI is a core MVP requirement. An audience member should immediately recognize
 whose repository is open, what the agent is doing, and what evidence supports the
-result. These are planning requirements only; UI implementation is deferred.
+result. The local implementation now provides the repository tree, code and diff
+panes, linked test evidence, current decision and next action, plan status, skill
+calls, and expandable tool activity. The table retains the full product target;
+GitHub identity, audience access, and result PRs still need integration.
 
 | Area | Required content and behavior |
 | --- | --- |
@@ -72,21 +88,35 @@ status labels, keep code readable on a projector, and avoid forced scrolling
 while a person is reading. A "Follow agent" control resumes automatic focus on
 the latest action. Queueing, connection loss, failures, and retries must be visible.
 
-Every activity and skill label must come from recorded execution data. The current
-skills package provides static prompts, so it can initially be shown as configured
-guidance; an "active skill" indicator requires a real activation record. Show
-public action summaries and observable tool results, not invented agent narration.
-Keep private source and sensitive tool output restricted to authorized viewers.
+Every activity and skill label comes from recorded execution data. Local agents
+now load versioned defensive instructions through `use_skill`; configured system
+guidance remains separately labeled. `report_progress` records a public decision
+summary, next action, evidence paths, and a plan of up to six steps. The harness
+requires a skill call and initial plan before repository tools, and accepts
+evidence paths only from the supplied test, read/search results, or successful
+source edits. These updates explain the agent's decisions without exposing hidden
+reasoning or fabricating narration.
 
-Plan the supporting event data before implementing the interface:
+The implemented event and viewing path provides:
 
-- Correlate tool start, completion, and error events with a call ID, role, stage,
-  target, and duration. Record any public action summary explicitly.
-- Record guidance/skill identity and version, with activation events when runtime
-  skill loading exists. Do not infer skill use from a stage transition alone.
-- Bind repository identity, file contents, and successful-edit diffs to the
-  checked commit and run. Preserve these artifacts so replay and refresh recover
-  the same repository, activity, and evidence after execution ends.
+- Tool start, completion, and error events correlated by call ID, with role,
+  stage, target, duration, and expandable arguments/results.
+- `skill_call` events with skill identity, version, and activation reason, plus
+  `agent_update` events for the public decision and plan. Skill use is never
+  inferred from a stage transition.
+- Live SSE updates for server-started runs and CLI events observed from disk,
+  plus explicitly labeled recorded playback with pause, seek, and speed controls.
+  Missing completion events show an inactive stream rather than a finished run.
+- Checked-commit file previews, recorded diffs, and persisted test evidence.
+  New local runs retain the source path in private `repository.json` metadata;
+  older runs or unavailable repositories may lack file previews while recorded
+  activity and evidence remain accessible.
+
+If a supplied regression already passes, the view says no model was invoked and
+shows harness checks without inventing skill calls or a plan. The server binds to
+`127.0.0.1:8787`; the development dashboard runs on port 5173, and a built dashboard
+can be served by the same local API. This is the presenter's local interface;
+authenticated audience access remains part of the GitHub/QR work.
 
 Acceptance: a viewer can identify the repository, current role, current action,
 and result at a glance; expand a tool call; inspect the associated file/diff;
