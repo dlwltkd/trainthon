@@ -121,7 +121,10 @@ pnpm cli run \
 
 Pytest uses harness-owned configuration and disables plugin autoload. Existing
 `conftest.py` fixtures remain available and immutable; `TESTING=1` is set and
-dotenv loading is disabled. Test setup/import errors are recorded separately
+dotenv loading is disabled. `DATABASE_URL` points to a temporary SQLite database
+inside each test container; these environment settings are saved in the runtime
+record. Projects requiring another database need a separate adapter.
+Test setup/import errors are recorded separately
 from failed assertions. Skipped or expected-failure regression cases cannot pass
 verification. Protected fixtures may be up to 8 MB each; source and supplied
 regression files remain capped at 2 MB, within a 30 MB / 3000-file snapshot.

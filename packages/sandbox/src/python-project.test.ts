@@ -145,6 +145,8 @@ test("Docker installs only wheels without repository code and runs pytest with i
     expect(run.opts.maxOutputBytes).toBe(3_000_000);
     expect(JSON.stringify(calls)).not.toContain(sentinel);
     expect(runner.runtime).toMatchObject({ adapter: "pytest", conftest: "immutable", packageManager: "pip@25.1.1", pytestVersion: "9.1.1" });
+    expect(runner.runtime!.testEnvironment.DATABASE_URL).toBe("sqlite:////tmp/vouch-test.sqlite3");
+    expect(run.args).toContain("DATABASE_URL=sqlite:////tmp/vouch-test.sqlite3");
     expect(runner.runtime!.dependencies[0]!.sha256).toBe("a".repeat(64));
     await expect(runner.runTests("/tmp/outside", "regression", { timeoutMs: 1000 })).rejects.toThrow("outside");
     expect(calls.filter(call => call.args[0] === "rm")).toHaveLength(2);
@@ -178,7 +180,7 @@ test.runIf(process.env.VOUCH_DOCKER_TESTS === "1")("real pytest distinguishes ar
   writeFileSync(join(workspace.baselineDir, "arithmetic.py"), "def add(a, b): return a - b\n");
   writeFileSync(join(workspace.baselineDir, "tests", "test_regression.py"), "from arithmetic import add\ndef test_sum(): assert add(2, 1) == 3\n");
   writeFileSync(join(workspace.baselineDir, "tests", "test_functional.py"), "from arithmetic import add\ndef test_zero(): assert add(0, 0) == 0\n");
-  writeFileSync(join(workspace.baselineDir, "conftest.py"), "import os\nimport pytest\n@pytest.fixture(autouse=True)\ndef test_env(): assert os.environ['TESTING'] == '1'\n");
+  writeFileSync(join(workspace.baselineDir, "conftest.py"), "import os\nimport sqlite3\nimport pytest\n@pytest.fixture(autouse=True)\ndef test_env():\n    assert os.environ['TESTING'] == '1'\n    with sqlite3.connect(os.environ['DATABASE_URL'].removeprefix('sqlite:///')) as db:\n        db.execute('CREATE TABLE IF NOT EXISTS example (value INTEGER)')\n");
   writeFileSync(join(workspace.baselineDir, "pytest.ini"), "[pytest]\naddopts = --collect-only\n");
   cpSync(workspace.baselineDir, workspace.dir, { recursive: true });
   const runner = new PythonProjectRunner();

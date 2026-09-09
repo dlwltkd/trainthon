@@ -43,6 +43,7 @@ export interface PytestRuntime {
   packageManager: string;
   pythonVersion: string;
   pytestVersion: string;
+  testEnvironment: Record<string, string>;
   dependencies: Array<{ name: string; version: string; sha256: string }>;
 }
 export type ProjectRuntime = VitestRuntime | PytestRuntime;

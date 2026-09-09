@@ -11,6 +11,12 @@ import type { ExecResult } from "./exec.js";
 
 export const DEFAULT_PYTHON_IMAGE = "python:3.11-slim@sha256:3c1dfceb3f1267d4d378e7883cddf35c58757bab98d70bba30b6e02e808fa21d";
 const MAX_METADATA_BYTES = 2_000_000;
+const TEST_ENVIRONMENT = {
+  TESTING: "1",
+  DATABASE_URL: "sqlite:////tmp/vouch-test.sqlite3",
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
+  PYTHON_DOTENV_DISABLED: "1",
+};
 const canonicalName = (name: string) => name.toLowerCase().replace(/[-_.]+/g, "-");
 
 interface PythonRequirements {
@@ -93,6 +99,7 @@ function runtimeFromReport(report: unknown, requirements: PythonRequirements, im
     requirementsFile: requirements.file, requirementsHash: requirements.hash,
     packageManager: `pip@${data.pip_version}`, pythonVersion: data.environment!.python_full_version!,
     pytestVersion: installed.get("pytest")!, dependencies: dependencies.sort((a, b) => a.name.localeCompare(b.name)),
+    testEnvironment: { ...TEST_ENVIRONMENT },
   };
 }
 
@@ -168,7 +175,7 @@ export class PythonProjectRunner implements ProjectTestRunner {
         "--network=none", "--mount", `type=bind,src=${runDir},dst=/repo,readonly`,
         "--mount", `type=bind,src=${join(this.root, "setup", "deps")},dst=/deps,readonly`,
         "--mount", `type=bind,src=${join(this.root, "tools")},dst=/vouch,readonly`,
-        "--env", "TESTING=1", "--env", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "--env", "PYTHON_DOTENV_DISABLED=1",
+        ...Object.entries(TEST_ENVIRONMENT).flatMap(([name, value]) => ["--env", `${name}=${value}`]),
         "--workdir=/repo", this.image, "python", "-I", "-B", "/vouch/run.py", selection, this.workspace.regressionPath,
       ], opts, 3_000_000);
     } finally { if (functionalSnapshot) rmSync(functionalSnapshot, { recursive: true, force: true }); }
