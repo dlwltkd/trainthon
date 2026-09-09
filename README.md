@@ -13,9 +13,19 @@ Its CLI and local dashboard show the repository alongside actual skill calls,
 public decision summaries, plans, tools, and supporting evidence. Source review,
 source remediation, and regression-based repair are implemented. Dedicated configuration, dependency,
 and incident-artifact review workflows remain planned, along with GitHub
-App/OAuth connection, private remote repository access, the QR audience flow, and
+App/OAuth connection, private remote repository access, the authenticated Actions audience flow, and
 large-scale benchmark comparisons. Public-repository draft PR delivery is available through
 an explicit action in the dashboard.
+
+The public audience demo is available at `/#/join` on phones and laptops. Submit
+a public GitHub URL, follow the queued source review, and keep its result link or
+download the report. New reviews can include source-matched before/after code
+suggestions; these are not applied or tested. `/#/present` generates a presentation QR for the deployed
+address. Run `pnpm build:dashboard && pnpm start:public` for rehearsal; see
+[deployment and event limits](DEPLOY.md) for the single-service hosting setup.
+For a Vercel frontend, use the repository root and set `VOUCH_API_ORIGIN` to the
+public review server's HTTPS origin. The included `vercel.mjs` builds the audience
+entry and proxies its API requests; the review server still needs persistent storage.
 
 ## Why Vouch
 
@@ -33,28 +43,16 @@ an explicit action in the dashboard.
 
 ## Measured benchmark results
 
-On 10 September 2026, we completed all 40 paired trials on a pinned, source-only
+On 10 September 2026, we completed all 100 paired trials on a pinned, source-only
 adaptation of 20 public CVE-Bench repair tasks. Both conditions requested
 `gpt-5.6-sol` and received the same named source modules and task prompts.
 
-| Measure | Codex CLI, source-only | Vouch, Red → Blue |
+| Measure | Codex CLI | Vouch, Red → Blue |
 | --- | ---: | ---: |
-| Exact module AST reference agreement | 1/20 (5%) | 1/20 (5%) |
-| Expected verdict with a verbatim source citation | 19/20 (95%) | 20/20 (100%) |
-| Completed trials | 20/20 | 20/20 |
-| Median trial time | 31.4 s | 90.2 s |
+| Expected verdict with a verbatim source citation | 40/50 (80%) | 47/50 (94%) |
+| Completed trials | 50/50 | 50/50 |
 
-The 5 percentage-point citation difference came from one altered character in a
-Codex source excerpt; both conditions identified all tasks as issue-present.
-It is an evidence-format difference, not an improvement in vulnerability
-detection. Exact patch-reference agreement was equal. No runtime security or
-regression tests were run, and this comparison does not establish a general
-cybersecurity-performance gain or results for unrestricted default Codex.
 
-See the [full results and frozen records](bench/cvebench20/RESULTS.md),
-[slide-ready wording](bench/cvebench20/SLIDE.md), and
-[synthetic development results](bench/development20/RESULTS.md).
-The earlier [CVEfixes source pilot](bench/CVEFIXES.md) is retained separately.
 
 ## How it's built
 
@@ -98,6 +96,12 @@ Open [http://localhost:5173](http://localhost:5173). Start a repository run
 from the form, or open a run started by the CLI. The dashboard follows new events
 from `runs/` and offers labeled replay with pause, seek, and speed controls for
 completed runs. The development server proxies API requests to `127.0.0.1:8787`.
+
+The [demo video script](DEMO_VIDEO.md) runs a bounded external assessment against
+one authorized Milgram event. Red records live status codes, field names, and
+security-header decisions without retaining response bodies, tokens, or PII values;
+Blue then creates reference remediation code and a Korean responsible-disclosure
+draft locally. No disclosure is sent. The completed live trace remains replayable.
 
 For a built dashboard served by the local API:
 
@@ -220,190 +224,3 @@ files unchanged. A completed candidate is `PATCH_PROPOSED` with scope
 verification. Review the findings and diff before using the patch. This mode
 still requires no test suite, dependency installation, or Docker.
 
-File reads and searches return bounded pages with continuation positions. Large
-files can be changed through an exact, unique `edit_file` replacement instead of
-rewriting their full contents. Prompt workflows do not impose a cumulative
-token ceiling across both roles, including conservative accounting when
-a gateway omits usage. Red investigates the requested source paths and returns
-its handoff when finished; there is no separate Red token or step cutoff.
-There is no cumulative model-step ceiling for prompt reviews. A shared
-twenty-minute wall-time limit still applies, including provider retry waits
-and Blue validation. The handoff must
-disclose unread source and unresolved questions. Existing-test and benchmark workflows retain their
-200,000-token default. Before each model request, the harness
-also reserves a conservative allowance for its context and output. A request
-can exceed that allowance while recorded usage remains below the limit; this is
-reported as a request-size limit, separately from time or step limits. It does
-not indicate the provider account's balance.
-
-Prompt reviews retry transient model API failures (HTTP 408, 429, and 5xx),
-connection failures marked retryable by the provider, and empty replies up to
-twice per request. Responses are streamed, with a 90-second inactivity deadline.
-Active streams can continue within the shared run deadline. The timeline shows
-waiting, receiving, tool preparation, first-response latency, and retry countdowns.
-Only execution metadata and public decision summaries are displayed.
-For a single-file snapshot, or exact repository paths named in the user prompt,
-the harness supplies complete source files directly in each role's initial
-context, up to eight files and 192 KB. This avoids repeated discovery calls while
-keeping Red's baseline and Blue's candidate separate. Omitted or changed source
-is still available through bounded file tools. The provided paths and content
-hashes are recorded in `source-context-red.json` and `source-context-blue.json`.
-
-Agents report meaningful decisions, changes, and completion through
-`report_progress`; the harness does not add model requests on a fixed step cadence.
-After 64 KB of new conversation history, prompt reviews request a fresh public
-progress update and compact older messages into a checkpoint. The original task,
-active skill, observed file paths, findings, Blue assessments, edit records, and
-latest plan remain available, along with the latest complete tool exchange and
-up to two recent source exchanges. The newest source exchange always remains
-intact; a second is retained when their combined size is at most 32 KB.
-Older source pages can be reread when an omitted detail is needed. Checkpoint events
-show the conversation's byte size before and after; this is not a token limit or
-a reduction of the provider's context window. Compaction and retry recovery apply
-within the current run, not across process restarts.
-Tool calls execute after a complete response; interrupted streams cannot execute
-partially received tools. Retries retain completed
-tool results and count toward the shared run limits; they do not restart the
-review. The timeline shows the HTTP status or timeout and the retry delay.
-`Retry-After` is honored when supplied; otherwise retries wait one and two
-seconds. Cancellation and the run deadline interrupt that wait. Failed attempts
-without usage are conservatively accounted and marked unknown. Repeated empty
-Red replies produce an explicitly partial handoff only when source was observed.
-If Red's transient API errors persist after retries, the harness retains its
-observed source and recorded findings in a partial handoff, with the provider
-failure attached. Blue may continue independent source validation, but a partial
-Red review leaves the overall run `INCOMPLETE_REVIEW`, preserves candidate changes,
-and disables draft PR delivery. Historical partial reviews are displayed the same
-way without rewriting their logs. Authentication errors, cancellation, and exhausted run limits still stop
-the run. If Blue already edited source before an interruption, the harness checks
-protected-file boundaries and saves the candidate diff before cleaning up the
-workspace. Saving that diff does not complete validation or enable PR delivery.
-
-To repair against an existing regression, provide `--regression`. Both `--report`
-and a supplemental `--prompt` are optional; `--fix` cannot be combined with this
-mode because regression repair already permits source changes:
-
-```bash
-pnpm cli run \
-  --repo /path/to/project \
-  --report ./report.md \
-  --regression tests/security.test.ts \
-  --mode live
-```
-
-Repair runs snapshot the requested commit, overlay the supplied regression,
-install the project's dependencies in Docker, and run tests without
-network access. Only JS/TS/Python application source can change. Local success is
-`TESTS_PASSED`, with verification scope `repository_tests` and
-`independentGrader: false`. It requires the exact regression and the functional
-suite to pass in a fresh copy; it is never reported as `FIXED_VERIFIED`.
-Artifacts are written below `runs/<runId>/` before cleanup.
-
-For a public GitHub run with a nonempty patch and status `PATCH_PROPOSED` or
-`TESTS_PASSED`, the result view offers **Create draft PR**. Set `GITHUB_TOKEN` or
-`GH_TOKEN` in the server environment or root `.env`, with repository Contents and
-Pull requests write permissions and push access to that repository. Restart the
-server after changing its environment. The button calls
-`POST /api/runs/:runId/pull-request` and creates a dedicated branch and draft PR
-only when selected; it does not merge the change. The checked commit must still
-be the repository's default-branch head. Fork delivery is not supported.
-
-The draft includes the observed verification scope. A `PATCH_PROPOSED` draft is
-explicitly marked untested; `TESTS_PASSED` describes the existing tests that ran.
-The token stays in the local server, while repository acquisition remains
-anonymous and limited to public HTTPS GitHub URLs.
-
-The CLI streams elapsed-time progress to stderr: repository setup, test starts
-and results, model requests, roles, skill calls, public decisions, and tool activity.
-Long operations print a waiting update every 10 seconds. The final summary goes to stdout;
-append `2>progress.log` to save the progress separately. Operation events are
-also persisted in `events.jsonl` for the dashboard and later review.
-
-Source review can load `source-security-review`, `auth-boundary-review`,
-`config-dependency-review`, and `remediation-planning`. Source remediation adds
-`source-remediation` and `change-validation`; regression repair retains
-`evidence-review`, `minimal-repair`, and `regression-verification`. Each uses real
-`use_skill` calls. Source findings are recorded with `report_finding`, including
-severity, confidence, observed file evidence, and a defensive recommendation.
-Confirmed source evidence is distinguished from potential issues and untested
-runtime assumptions. The harness
-requires an actual skill call and a `report_progress` plan before repository tools
-become available.
-Decision summaries include a next action, up to six plan steps, and evidence
-paths drawn from the supplied test, read/search results, or successful source edits.
-The dashboard renders the resulting `skill_call`, `agent_update`, and correlated
-tool events; it does not expose hidden reasoning or invent missing activity.
-When the baseline regression already passes, it explicitly shows that no model
-was invoked.
-
-The repository pane links inspected files, proposed diffs, and test results.
-Runs retain private repository metadata and public GitHub source snapshots for
-checked-revision previews. Local repair runs can also use the recorded source
-path while that repository remains available. Older runs may lack the necessary
-source metadata; their activity and evidence remain viewable without fabricated
-file contents.
-
-Vouch requires Node 22+, pnpm, and Git. The repair workflow additionally requires
-Docker and supports Node projects with one npm or pnpm lockfile, Vitest 4–5,
-and Vite 6.1 or newer, plus Python 3.11 projects with pytest 8–9.
-Functional tests must live in conventional protected test paths; a collected
-test outside those paths is rejected during setup.
-
-For Python, use a `.py` regression path. The runner reads root
-`requirements-test.txt` (or `requirements.txt`), follows relative `-r` includes,
-and requires exact `name==version` pins, including pytest. It installs PyPI wheels
-without mounting repository code during setup. Editable installs, source builds,
-custom indexes, version ranges, and environment markers are unsupported.
-
-```bash
-pnpm cli run \
-  --repo /path/to/python-project \
-  --report /path/to/python-project/docs/security-report.md \
-  --regression tests/test_security.py \
-  --mode live
-```
-
-Pytest uses harness-owned configuration and disables plugin autoload. Existing
-`conftest.py` fixtures remain available and immutable; `TESTING=1` is set and
-dotenv loading is disabled. `DATABASE_URL` points to a temporary SQLite database
-inside each test container; these environment settings are saved in the runtime
-record. Projects requiring another database need a separate adapter.
-Test setup/import errors are recorded separately
-from failed assertions. Skipped or expected-failure regression cases cannot pass
-verification. Protected fixtures may be up to 8 MB each; source and supplied
-regression files remain capped at 2 MB, within a 30 MB / 3000-file snapshot.
-
-The dependency-install container has network access during preparation. Install
-scripts, pnpm hooks, linked/file/custom-tarball dependencies, and non-npmjs URLs
-in npm locks are rejected; dependency extraction is monitored at 750 MB and
-100,000 entries. Test containers have no network, return structured
-evidence through a bounded output channel, and use a read-only repository mount. Each record includes the
-pinned container digest, runner and package-manager versions, dependency input hash,
-resolved input hash, and before/after test manifests. Python records also include
-the resolved dependency versions and wheel SHA-256 hashes from the
-[pip installation report](https://pip.pypa.io/en/stable/reference/installation-report/).
-Transitive Python dependencies are resolved during setup and reused throughout
-the run; direct requirements pins alone do not lock them across future runs.
-
-The repair workflow assumes the owner trusts the selected commit, lockfile, test runner,
-and tests. It uses immutable harness-owned test options: executable repository
-Vitest/Vite configs and environment files are disabled, and PostCSS receives an
-empty inline configuration. Config-defined plugins, setup files, aliases, and
-custom test patterns are outside this slice.
-
-The implemented sandbox runs supplied regression and functional tests in
-containers with networking disabled. Red reviews supplied evidence and observed
-test results through bounded read-only tools. A separate server lifecycle adapter
-for isolated startup, health checks, existing tests, bounded logs, and cleanup is
-planned; Vouch does not yet manage a persistent application server for that flow.
-No automatic attack or new-reproduction skill is part of these repository workflows.
-
-Editable application source runs in the same test process as the assertions. It
-can overfit visible tests or alter assertion behavior, so passing results require
-code review and are not proof of a security fix. The separate hidden grader is
-available only on the benchmark path. Hiding tests does not prevent same-runtime
-tampering; isolating grader control from candidate code for adversarial evaluation
-remains future work. Local results do not count as benchmark performance.
-
-Run the optional Docker integration check for the Python adapter with
-`VOUCH_DOCKER_TESTS=1 pnpm exec vitest run packages/sandbox/src/python-project.test.ts`.
