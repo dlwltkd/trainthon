@@ -26,7 +26,7 @@ const skillSchema = z.object({ skillId: text(80), reason: text(300) }).strict();
 const updateSchema = z.object({
   summary: text(500),
   nextAction: text(200),
-  evidence: z.array(text(500)).max(6).describe("Exact repository-relative file paths only, for example [\"src/app.ts\"]. Use [] when empty, never [\"[]\"]. No line numbers, descriptions, or intended future reads."),
+  evidence: z.array(text(500)).describe("Exact observed repository-relative file paths only, for example [\"src/app.ts\"]. Include all relevant observed files. Use [] when empty, never [\"[]\"]. No line numbers, descriptions, or intended future reads."),
   plan: z.array(z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]{1,40}$/),
     title: text(120),
@@ -69,7 +69,7 @@ export function createAgentTrace(options: TraceOptions) {
       execute: (args, call) => options.enqueue(() => {
         options.signal.throwIfAborted();
         const update = updateSchema.parse(args);
-        update.evidence = update.evidence.map(path => posix.normalize(path));
+        update.evidence = [...new Set(update.evidence.map(path => posix.normalize(path)))];
         const callId = requireCall(call);
         if (!selectedSkill) throw new Error("call use_skill before publishing a plan");
         if (new Set(update.plan.map(step => step.id)).size !== update.plan.length) throw new Error("plan step IDs must be unique");

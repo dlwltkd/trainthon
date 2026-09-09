@@ -5,18 +5,19 @@ import { join } from "node:path";
 import type { EventInput } from "@vouch/protocol";
 import type { AgentTool } from "@vouch/model";
 import type { LocalWorkspace } from "@vouch/sandbox";
-import { buildLocalRepairTools, buildLocalReviewTools } from "./local-tools.js";
+import { buildLocalRepairTools, buildLocalReviewTools, buildSourceReviewTools } from "./local-tools.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function fixture() {
+function fixture(extraFiles: string[] = []) {
   const dir = mkdtempSync(join(tmpdir(), "vouch-trace-")); roots.push(dir);
   mkdirSync(join(dir, "tests"));
   writeFileSync(join(dir, "app.py"), "def add(a, b): return a + b\n");
   writeFileSync(join(dir, "tests", "test_app.py"), "# supplied test\n");
+  for (const file of extraFiles) writeFileSync(join(dir, file), "# source observation fixture\n");
   const workspace: LocalWorkspace = {
     dir, baselineDir: dir, verificationDir: join(dir, "verification"), commit: "a".repeat(40),
-    regressionPath: "tests/test_app.py", regressionHash: "b".repeat(64), files: ["app.py", "tests/test_app.py"],
+    regressionPath: "tests/test_app.py", regressionHash: "b".repeat(64), files: ["app.py", "tests/test_app.py", ...extraFiles],
     protectedPaths: ["tests/test_app.py"], cleanup() {},
   };
   const events: EventInput[] = [];
@@ -31,6 +32,30 @@ const plan = {
   plan: [{ id: "inspect", title: "Inspect source", status: "in_progress" }],
 };
 const select = { skillId: "evidence-review", reason: "Locate the source checked by the supplied test." };
+
+test.each(["report_progress", "report_finding"])("%s accepts every observed evidence file and rejects unread files", async name => {
+  const files = Array.from({ length: 7 }, (_, index) => `source-${index}.py`);
+  const f = fixture(files);
+  const source = buildSourceReviewTools({ dir: f.workspace.dir, files: f.workspace.files }, f.controller.signal, event => f.events.push(event));
+  const call = (toolName: string, args: unknown) => {
+    const spec = source.tools.find(tool => tool.name === toolName)!;
+    return spec.execute(spec.schema.parse(args), { callId: toolName });
+  };
+  await call("use_skill", { skillId: "source-security-review", reason: "Review source across related files." });
+  await call("report_progress", { ...plan, evidence: [] });
+  for (const path of files) await call("read_file", { path });
+  const details = name === "report_progress" ? plan : {
+    id: "source-context", title: "Observed source context", severity: "info", confidence: "confirmed",
+    summary: "The selected source fixtures were read.", recommendation: "Continue the review using the observed context.",
+  };
+  await call(name, { ...details, evidence: [...files, files[0]] });
+  expect(f.events.at(-1)).toMatchObject({ evidence: files });
+  const count = f.events.length;
+  await expect(call(name, { ...details, evidence: [...files, "app.py"] })).rejects.toThrow(/observed.*file/);
+  await expect(call(name, { ...details, evidence: [...files, "../outside.py"] })).rejects.toThrow(/observed.*file/);
+  expect(f.events).toHaveLength(count);
+  await source.drain();
+});
 
 test("publishes actual role-scoped skill calls and public plans with the logged call identity", async () => {
   const f = fixture();

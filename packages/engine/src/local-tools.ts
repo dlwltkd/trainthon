@@ -209,7 +209,7 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
   const findingSchema = z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]{1,60}$/), title: z.string().trim().min(1).max(180),
     severity: z.enum(["info", "low", "medium", "high", "critical"]), confidence: z.enum(["confirmed", "potential"]),
-    evidence: z.array(z.string().min(1).max(500)).min(1).max(6),
+    evidence: z.array(z.string().min(1).max(500)).min(1).describe("Exact file paths already observed through read or search tools. Include all relevant observed files."),
     summary: z.string().trim().min(1).max(1500), recommendation: z.string().trim().min(1).max(1500),
   }).strict();
   const tools: AgentTool[] = [...trace.tools, ...readTools(workspace, signal, queue, trace), {
@@ -217,6 +217,7 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
     execute: (args, context) => queue.run(() => {
       signal.throwIfAborted(); trace.requireReady();
       const finding = findingSchema.parse(args);
+      finding.evidence = [...new Set(finding.evidence)];
       trace.assertEvidence(finding.evidence);
       if (!context?.callId) throw new Error("a logged call is required");
       if (findings.size >= 30 && !findings.has(finding.id)) throw new Error("finding limit reached");
