@@ -87,6 +87,7 @@ export function createAgentTrace(options: TraceOptions) {
   ];
   return {
     tools,
+    observedFiles: () => [...observed],
     activeSkill: () => selectedSkill,
     assertEvidence(paths: string[]) {
       if (!paths.length) throw new Error("at least one observed source file is required");

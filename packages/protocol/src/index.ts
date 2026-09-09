@@ -245,6 +245,7 @@ export interface ModelMsgEvent extends BaseEvent {
 export interface BudgetUpdateEvent extends BaseEvent {
   type: "budget_update";
   tokens: number;
+  usageKnown?: boolean;
   steps: number;
   elapsedMs: number;
   agentRole?: AgentRole;
@@ -351,4 +352,10 @@ export const DEFAULT_BUDGETS: Budgets = {
   maxTokens: 200_000,
   maxSteps: 40,
   maxWallMs: 8 * 60_000,
+};
+
+/** Two-role repository reviews also account conservatively for gateways with missing usage. */
+export const DEFAULT_REPOSITORY_BUDGETS: Budgets = {
+  ...DEFAULT_BUDGETS,
+  maxTokens: 500_000,
 };

@@ -1,8 +1,13 @@
 import type { Budgets } from "@vouch/protocol";
 
 export class BudgetExceededError extends Error {
-  constructor(readonly reason: "tokens" | "steps" | "wall") {
-    super(`Run ${reason} budget exhausted`);
+  constructor(
+    readonly reason: "tokens" | "steps" | "wall",
+    readonly requestAllowance?: { requested: number; remaining: number; used: number; limit: number },
+  ) {
+    super(requestAllowance
+      ? `Next model request exceeds the remaining token allowance: its conservative estimate requires at least ${requestAllowance.requested} tokens; ${requestAllowance.remaining} remain (${requestAllowance.used} used of ${requestAllowance.limit}). No provider request was sent.`
+      : `Run ${reason} budget exhausted`);
     this.name = "BudgetExceededError";
   }
 }
@@ -74,7 +79,12 @@ export class RunBudget {
     }
     this.check();
     if (tokens <= this.remainingTokens) return;
-    const error = new BudgetExceededError("tokens");
+    const error = new BudgetExceededError("tokens", {
+      requested: tokens,
+      remaining: this.remainingTokens,
+      used: this.totals.inputTokens + this.totals.outputTokens,
+      limit: this.limits.maxTokens,
+    });
     this.controller.abort(error);
     throw error;
   }

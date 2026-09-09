@@ -75,7 +75,7 @@ describe("source review and remediation skills", () => {
     for (const catalog of [REPOSITORY_REVIEW_SKILLS, SOURCE_REPAIR_SKILLS]) {
       expect(new Set(catalog.map(skill => skill.id)).size).toBe(catalog.length);
       for (const skill of catalog) {
-        expect(skill.roles).toEqual(["blue"]);
+        expect(skill.roles).toEqual(["source-remediation", "change-validation"].includes(skill.id) ? ["blue"] : ["red", "blue"]);
         expect(skill.version).toMatch(/^\d+\.\d+\.\d+$/);
         expect(skill.instructions.length).toBeGreaterThan(skill.description.length);
       }
@@ -120,7 +120,15 @@ describe("source review and remediation skills", () => {
     expect(validation).toContain("do not edit files");
     expect(systemPromptRepositoryReview()).toContain("result scope is source_review");
     expect(systemPromptRepositoryReview()).not.toContain("source-remediation");
-    expect(REPOSITORY_REVIEW_GUIDANCE.version).toBe("1.1.0");
-    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.0.0");
+    expect(REPOSITORY_REVIEW_GUIDANCE.version).toBe("1.2.0");
+    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.1.0");
+  });
+
+  test("separates Red's read-only discovery from Blue's independent source validation", () => {
+    expect(systemPromptRepositoryReview("red")).toContain("You are Red, the source reviewer");
+    expect(systemPromptRepositoryReview("red")).toContain("within the assigned review allowance");
+    expect(systemPromptRepositoryReview()).toContain("supported, rejected, or unresolved");
+    expect(systemPromptRepositoryRepair()).toContain("Record your own supported finding before editing");
+    expect(systemPromptRepositoryRepair()).toContain("bounded read_file line ranges");
   });
 });

@@ -98,6 +98,17 @@ describe("RunBudget", () => {
     expect(() => shared.check()).toThrow("steps budget exhausted");
   });
 
+  it("distinguishes request admission from tokens already consumed", () => {
+    const shared = budget({ maxTokens: 200_000 });
+    shared.consumeStep(11_922, 408);
+    expect(() => shared.requireTokens(210_000)).toThrow("12330 used of 200000");
+    expect(shared.signal.reason).toMatchObject({
+      reason: "tokens",
+      requestAllowance: { requested: 210_000, remaining: 187_670, used: 12_330, limit: 200_000 },
+    });
+    expect(shared.usage).toEqual({ inputTokens: 11_922, outputTokens: 408, steps: 1 });
+  });
+
   it("enforces an immutable copy of caller-supplied limits", () => {
     const supplied = { ...limits, maxTokens: 50 };
     const shared = new RunBudget(supplied);
@@ -178,6 +189,47 @@ describe("SdkRunner", () => {
     expect(model.doGenerateCalls[0]?.toolChoice).toEqual({ type: "required" });
   });
 
+  it("uses the selected role output allowance when provider usage is unknown", async () => {
+    const model = new MockLanguageModelV2({ doGenerate: replyWithoutUsage() });
+    const run = input();
+    run.maxOutputTokens = 2048;
+    const result = await new SdkRunner(() => model, { missingUsagePolicy: "conservative-bound" }).run(run);
+    expect(model.doGenerateCalls[0]?.maxOutputTokens).toBe(2048);
+    expect(result.outputTokens).toBe(2048);
+    expect(run.budget!.usageKnown).toBe(false);
+    expect(run.events).toContainEqual(expect.objectContaining({ type: "budget_update", usageKnown: false }));
+  });
+
+  it.each([
+    { tokens: 10_000, steps: 1 },
+    { tokens: 12, steps: 10 },
+  ])("finishes the role with a tool-free handoff after %j while retaining shared usage", async handoffAfter => {
+    const model = new MockLanguageModelV2({ doGenerate: [toolReply(), reply([{ type: "text", text: "Observed the fixture; further source validation remains." }])] });
+    const run = input();
+    const execute = vi.fn(async () => "observed source fixture");
+    run.tools = [fileTool(execute)];
+    run.handoffAfter = handoffAfter;
+    const result = await new SdkRunner(() => model).run(run);
+    expect(result.finalText).toContain("further source validation remains");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    const finalCall = model.doGenerateCalls[1]!;
+    expect(finalCall.tools ?? []).toEqual([]);
+    expect(finalCall.toolChoice).toEqual({ type: "none" });
+    expect(JSON.stringify(finalCall.prompt)).toContain("source you actually observed");
+    expect(run.budget!.usage).toEqual({ inputTokens: 20, outputTokens: 4, steps: 2 });
+    expect(run.budget!.remainingTokens).toBe(limits.maxTokens - 24);
+    expect(run.events).toContainEqual(expect.objectContaining({ type: "action_summary", summary: expect.stringContaining("Investigation allowance reached") }));
+  });
+
+  it.each([0, -1, 8193, 1.5, NaN])("rejects invalid role output allowance %s without a provider call", async value => {
+    const model = new MockLanguageModelV2({ doGenerate: reply() });
+    const run = input();
+    run.maxOutputTokens = value;
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("maxOutputTokens");
+    expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
   it("rejects missing provider usage in the default strict mode", async () => {
     const model = new MockLanguageModelV2({ doGenerate: replyWithoutUsage() });
     const run = input();
@@ -229,7 +281,7 @@ describe("SdkRunner", () => {
     const model = new MockLanguageModelV2({ doGenerate: reply() });
     const run = input(budget({ maxTokens: 1_000 }));
     run.prompt = "x".repeat(2_000);
-    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("tokens budget exhausted");
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("Next model request exceeds the remaining token allowance");
     expect(model.doGenerateCalls).toHaveLength(0);
     expect(run.budget!.usage).toEqual({ inputTokens: 0, outputTokens: 0, steps: 0 });
   });
@@ -238,7 +290,7 @@ describe("SdkRunner", () => {
     const model = new MockLanguageModelV2({ doGenerate: [toolReply(), reply()] });
     const run = input(budget({ maxTokens: 2_500 }));
     run.tools = [fileTool(async () => "x".repeat(3_000))];
-    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("tokens budget exhausted");
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("Next model request exceeds the remaining token allowance");
     expect(model.doGenerateCalls).toHaveLength(1);
     expect(run.budget!.usage).toEqual({ inputTokens: 10, outputTokens: 2, steps: 1 });
   });

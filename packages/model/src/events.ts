@@ -17,6 +17,7 @@ function actionSummary(name: string, args: unknown): string {
     case "list_dir": return path ? `Listing ${path}` : "Listing repository files";
     case "grep": return short(input.pattern) ? `Searching for ${JSON.stringify(short(input.pattern))}` : "Searching repository text";
     case "write_file": return path ? `Updating ${path}` : "Updating an application source file";
+    case "edit_file": return path ? `Editing the selected source in ${path}` : "Editing an application source file";
     case "run_regression":
     case "run_repro": return "Running the supplied security regression";
     case "run_functional_tests":
@@ -32,7 +33,7 @@ function actionSummary(name: string, args: unknown): string {
 
 export function toolEventArgs(name: string, args: unknown): unknown {
   let safe = args;
-  if (name === "write_file" && args && typeof args === "object") {
+  if ((name === "write_file" || name === "edit_file") && args && typeof args === "object") {
     const input = args as Record<string, unknown>;
     if (typeof input.content === "string") {
       safe = {
@@ -40,6 +41,15 @@ export function toolEventArgs(name: string, args: unknown): unknown {
         content: `[omitted ${Buffer.byteLength(input.content)} bytes]`,
         contentSha256: createHash("sha256").update(input.content).digest("hex"),
       };
+    }
+    if (name === "edit_file") {
+      const edits = { ...input };
+      for (const field of ["oldText", "newText"]) {
+        if (typeof input[field] !== "string") continue;
+        edits[field] = `[omitted ${Buffer.byteLength(input[field])} bytes]`;
+        edits[`${field}Sha256`] = createHash("sha256").update(input[field]).digest("hex");
+      }
+      safe = edits;
     }
   }
   const serialized = JSON.stringify(safe) ?? "null";
@@ -55,7 +65,7 @@ export function eventContext(input: AgentRunInput) {
 export function emitUsage(input: AgentRunInput, budget: RunBudget, inputTokens: number, outputTokens: number): void {
   input.onEvent({ type: "model_msg", role: "assistant", tokensIn: inputTokens, tokensOut: outputTokens, ...eventContext(input) });
   const usage = budget.usage;
-  input.onEvent({ type: "budget_update", tokens: usage.inputTokens + usage.outputTokens, steps: usage.steps, elapsedMs: budget.elapsedMs, ...eventContext(input) });
+  input.onEvent({ type: "budget_update", tokens: usage.inputTokens + usage.outputTokens, usageKnown: budget.usageKnown, steps: usage.steps, elapsedMs: budget.elapsedMs, ...eventContext(input) });
 }
 
 export async function executeLoggedTool(

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ScriptedRunner, type ScriptToolMap } from "@vouch/model";
+import { ScriptedRunner, type ScriptToolMap, type RunBudget } from "@vouch/model";
 import type { HarnessEvent } from "@vouch/protocol";
 import { executeRepositoryReview, type ExecuteRepositoryReviewOptions } from "./repository-review.js";
 
@@ -80,6 +80,191 @@ function assertFinal(record: Awaited<ReturnType<typeof executeRepositoryReview>>
 }
 
 describe("prompt-driven source review", () => {
+  const reviewModel = { provider: "compatible" as const, model: "review-test", baseURL: "https://api.routeway.ai/v1" };
+
+  it("hands Red findings to Blue and requires Blue's own source evidence before editing", async () => {
+    const f = fixture();
+    const phases: string[] = [];
+    let sharedBudget: RunBudget | undefined;
+    const record = await executeRepositoryReview({
+      ...f.options, remediate: true, reviewModel,
+      reviewRunner: { run: async input => {
+        phases.push(input.role!); sharedBudget = input.budget;
+        expect(input.system).toContain("You are Red");
+        expect(input.handoffAfter).toEqual({ tokens: 9000, steps: 3 });
+        return new ScriptedRunner(async tools => {
+          for (const name of ["write_file", "edit_file", "inspect_diff", "run_regression", "shell", "fetch"]) expect(tools[name]).toBeUndefined();
+          await startReview(tools);
+          await tools.report_finding!(finding);
+          await expect(tools.use_skill!({ skillId: "source-remediation", reason: "Try changing source." })).rejects.toThrow();
+          await tools.report_progress!(progress(["src/add.ts"], true));
+          return "Red observed subtraction in src/add.ts; Blue must independently check the arithmetic behavior.";
+        }).run(input);
+      } },
+      runner: { run: async input => {
+        phases.push(input.role!);
+        expect(input.budget).toBe(sharedBudget);
+        expect(input.prompt).toContain("Red source-review handoff");
+        expect(input.prompt).toContain('"findingId": "addition"');
+        expect(input.system).toContain("Independently validate every Red finding");
+        return new ScriptedRunner(async tools => {
+          await tools.use_skill!({ skillId: "source-security-review", reason: "Check Red's arithmetic observation." });
+          await tools.report_progress!(progress());
+          await expect(tools.report_finding!(finding)).rejects.toThrow("observed file");
+          await tools.use_skill!({ skillId: "source-remediation", reason: "Check whether Red's finding authorizes a patch." });
+          await expect(tools.write_file!({ path: "src/add.ts", content: corrected })).rejects.toThrow("confirmed source-backed finding");
+          await startReview(tools);
+          await edit(tools);
+          await inspect(tools);
+          await tools.report_progress!(progress(["src/add.ts"], true));
+          return "Blue independently confirmed Red's arithmetic observation and inspected the proposed correction. Tests were not run.";
+        }).run(input);
+      } },
+    });
+    expect(phases).toEqual(["red", "blue"]);
+    expect(record.status).toBe("PATCH_PROPOSED");
+    expect(record.reviewModel).toEqual(reviewModel);
+    expect(record.reviewSummary).toContain("Red observed subtraction");
+    expect(record.reviewHandoffAfter).toEqual({ tokens: 9000, steps: 3 });
+    expect(record.usage.steps).toBe(2);
+    expect(record.findings.map(finding => [finding.agentRole, finding.findingId])).toEqual([["red", "addition"], ["blue", "addition"]]);
+    expect(record.changes.findingIdsByFile).toEqual({ "src/add.ts": ["addition"] });
+    expect(f.events.filter(event => event.type === "role_assigned").map(event => event.role)).toEqual(["red", "blue"]);
+    expect(f.events.filter(event => event.type === "skill_call")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentRole: "red", skillId: "source-security-review", stage: "REVIEW" }),
+      expect.objectContaining({ agentRole: "blue", skillId: "source-remediation", stage: "PATCH" }),
+    ]));
+    expect(JSON.parse(readFileSync(record.artifacts.redReviewHandoff!, "utf8"))).toMatchObject({ sourceEvidenceObserved: true, testsRun: false, findings: [expect.objectContaining({ findingId: "addition" })] });
+    expect(readFileSync(record.artifacts.redReviewSummary!, "utf8")).toBe(record.reviewSummary);
+    assertFinal(record, f);
+  });
+
+  it.each(["no source evidence", "empty summary"])("does not start Blue after Red returns %s", async missing => {
+    const f = fixture();
+    let blueInvoked = false;
+    const record = await executeRepositoryReview({
+      ...f.options, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => {
+        if (missing === "empty summary") await startReview(tools);
+        return missing === "empty summary" ? "" : "I assume the source is fine.";
+      }),
+      runner: new ScriptedRunner(async () => { blueInvoked = true; return "Unexpected Blue run"; }),
+    });
+    expect(record.status).toBe("INCOMPLETE_REVIEW");
+    expect(record.reason).toContain("Blue was not started");
+    expect(blueInvoked).toBe(false);
+    expect(record.summary).toBe("");
+    expect(record).not.toHaveProperty("delivery");
+    assertFinal(record, f);
+  });
+
+  it("does not count Red's observations as Blue's completed validation", async () => {
+    const f = fixture();
+    const record = await executeRepositoryReview({
+      ...f.options, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { await startReview(tools); return "Reviewed arithmetic source; Blue must validate."; }),
+      runner: new ScriptedRunner(async tools => {
+        await tools.use_skill!({ skillId: "source-security-review", reason: "Review Red's summary." });
+        await tools.report_progress!(progress());
+        return "I agree with Red without reading source.";
+      }),
+    });
+    expect(record.status).toBe("INCOMPLETE_REVIEW");
+    expect(record).not.toHaveProperty("delivery");
+    assertFinal(record, f);
+  });
+
+  it.each(["read", "search"])("accepts Red's bounded handoff from an actual %s without inventing a final progress event", async sourceTool => {
+    const f = fixture();
+    const record = await executeRepositoryReview({
+      ...f.options, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => {
+        await tools.use_skill!({ skillId: "source-security-review", reason: "Inspect the selected arithmetic source." });
+        await tools.report_progress!(progress());
+        if (sourceTool === "read") await tools.read_file!({ path: "src/add.ts" });
+        else await tools.grep!({ pattern: "a - b", path: "src/add.ts" });
+        return "Observed subtraction in src/add.ts. This bounded review did not establish wider coverage; Blue should independently review the source.";
+      }),
+      runner: new ScriptedRunner(async tools => { await startReview(tools); return "Independently inspected the source; no tests were run."; }),
+    });
+    expect(record.status).toBe("REVIEW_COMPLETE");
+    expect(f.events.filter(event => event.type === "agent_update" && event.agentRole === "red")).toEqual([expect.objectContaining({ evidence: [] })]);
+    expect(JSON.parse(readFileSync(record.artifacts.redReviewHandoff!, "utf8"))).toMatchObject({ observedFiles: ["src/add.ts"], sourceEvidenceObserved: true, findings: [] });
+    expect(record.findings).toEqual([]);
+    assertFinal(record, f);
+  });
+
+  it("does not count a listing or an empty search as observed Red source evidence", async () => {
+    const f = fixture();
+    let blueInvoked = false;
+    const record = await executeRepositoryReview({
+      ...f.options, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => {
+        await tools.use_skill!({ skillId: "source-security-review", reason: "Locate the relevant source." });
+        await tools.report_progress!(progress());
+        await tools.list_dir!({ path: "." });
+        await tools.grep!({ pattern: "nonexistent-expression", path: "src/add.ts" });
+        return "No source contents were inspected before this handoff.";
+      }),
+      runner: new ScriptedRunner(async () => { blueInvoked = true; return "Unexpected"; }),
+    });
+    expect(record.status).toBe("INCOMPLETE_REVIEW");
+    expect(blueInvoked).toBe(false);
+    expect(JSON.parse(readFileSync(record.artifacts.redReviewHandoff!, "utf8"))).toMatchObject({ observedFiles: [], sourceEvidenceObserved: false });
+    assertFinal(record, f);
+  });
+
+  it("lets Blue reject Red's claim without making a source change", async () => {
+    const f = fixture();
+    const record = await executeRepositoryReview({
+      ...f.options, remediate: true, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => {
+        await startReview(tools); await tools.report_finding!({ ...finding, id: "wrong-claim", title: "The function multiplies operands", summary: "Potential arithmetic mismatch.", confidence: "potential" });
+        return "Please check the potential wrong-claim finding.";
+      }),
+      runner: new ScriptedRunner(async tools => {
+        await startReview(tools); await tools.report_progress!(progress(["src/add.ts"], true));
+        return "Rejected wrong-claim: the observed source subtracts and does not multiply. No change proposed under this claim; tests were not run.";
+      }),
+    });
+    expect(record.status).toBe("REVIEW_COMPLETE");
+    expect(record.findings).toEqual([expect.objectContaining({ findingId: "wrong-claim", agentRole: "red", confidence: "potential" })]);
+    expect(record.changes.files).toEqual([]);
+    expect(record).not.toHaveProperty("delivery");
+    assertFinal(record, f);
+  });
+
+  it("shares the run budget across Red and Blue rather than resetting it at handoff", async () => {
+    const f = fixture();
+    let blueInvoked = false;
+    const record = await executeRepositoryReview({
+      ...f.options, budgets: { ...f.options.budgets, maxSteps: 1 }, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { await startReview(tools); return "Source inspected; handoff prepared."; }),
+      runner: new ScriptedRunner(async () => { blueInvoked = true; return "Unexpected"; }),
+    });
+    expect(record.status).toBe("BUDGET_TIMEOUT");
+    expect(record.reason).toContain("steps");
+    expect(record.reviewSummary).toContain("handoff prepared");
+    expect(record.usage.steps).toBe(1);
+    expect(blueInvoked).toBe(false);
+    assertFinal(record, f);
+  });
+
+  it("stops before Blue when Red is cancelled and cleans the shared snapshot", async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    let blueInvoked = false;
+    const record = await executeRepositoryReview({
+      ...f.options, signal: controller.signal, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { await startReview(tools); controller.abort(); return "Late Red answer"; }),
+      runner: new ScriptedRunner(async () => { blueInvoked = true; return "Unexpected"; }),
+    });
+    expect(record.status).toBe("CANCELLED");
+    expect(blueInvoked).toBe(false);
+    expect(record.summary).toBe("");
+    assertFinal(record, f);
+  });
+
   it("persists a setup failure and final event when model configuration is invalid", async () => {
     const f = fixture();
     let invoked = false;

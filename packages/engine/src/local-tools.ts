@@ -1,11 +1,13 @@
 import { z, type ZodType } from "zod";
+import { join } from "node:path";
+import { lstatSync } from "node:fs";
 import type { EventInput, FindingReportedEvent } from "@vouch/protocol";
 import type { AgentTool } from "@vouch/model";
 import { createAgentTrace, type AgentTrace, type TraceWorkspace } from "./agent-trace.js";
 import { REPOSITORY_REVIEW_SKILLS, SOURCE_REPAIR_SKILLS } from "@vouch/skills";
 import {
   listDirTool,
-  readFileTool,
+  readBoundedRegularFile,
   writeLocalSource,
   isLocalSourcePath,
   captureLocalChanges,
@@ -54,20 +56,80 @@ class SerialToolQueue {
   }
 }
 
-function literalSearch(workspace: TraceWorkspace, query: string) {
-  const hits: Array<{ file: string; line: number; text: string }> = [];
-  for (const file of listDirTool(workspace.dir)) {
+const READ_PAGE_BYTES = 12_000;
+const SEARCH_PAGE_BYTES = 8_000;
+const LIST_PAGE_BYTES = 8_000;
+const editText = z.string().max(20_000).refine(value => Buffer.byteLength(value) <= 20_000, "edit text exceeds 20 KB");
+const editSchema = z.object({ path: z.string().min(1).max(500), oldText: editText.refine(value => value.length > 0, "oldText must not be empty"), newText: editText, findingId: z.string().max(60).optional() });
+
+function replaceExact(content: string, oldText: string, newText: string): string {
+  if (!oldText) throw new Error("oldText must not be empty");
+  const index = content.indexOf(oldText);
+  if (index < 0) throw new Error("oldText was not found; read the relevant page and retry with exact source text");
+  if (content.indexOf(oldText, index + 1) >= 0) throw new Error("oldText matches more than once; include additional surrounding source text");
+  return content.slice(0, index) + newText + content.slice(index + oldText.length);
+}
+
+function repositoryText(workspace: TraceWorkspace, path: string): string {
+  // Reuse sandbox path, hidden-file and symlink checks before opening the file.
+  const entries = listDirTool(workspace.dir, path);
+  if (entries.length !== 1 || entries[0]?.endsWith("/")) throw new Error("path must name a repository file");
+  const absolutePath = join(workspace.dir, path);
+  return readBoundedRegularFile(absolutePath, Math.min(lstatSync(absolutePath).size, 8_000_000), "repository file").toString("utf8");
+}
+
+function textPage(value: string, maxBytes: number): string {
+  let bytes = 0;
+  let length = 0;
+  for (const character of value) {
+    const size = Buffer.byteLength(JSON.stringify(character)) - 2;
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    length += character.length;
+  }
+  return value.slice(0, length);
+}
+
+function readPage(content: string, startLine = 1, startColumn = 0, maxLines = 120) {
+  const lines = content.split("\n");
+  const first = lines[startLine - 1];
+  if (first === undefined || startColumn > first.length) throw new Error("read offset is outside the file; use the returned next cursor");
+  if (startColumn > 0 && /[\uDC00-\uDFFF]/.test(first[startColumn] ?? "")) throw new Error("startColumn splits a Unicode character; use the returned next cursor");
+  const selected = lines.slice(startLine - 1, startLine - 1 + maxLines);
+  selected[0] = first.slice(startColumn);
+  const hasMoreLines = startLine - 1 + selected.length < lines.length;
+  const page = textPage(selected.join("\n") + (hasMoreLines ? "\n" : ""), READ_PAGE_BYTES);
+  const parts = page.split("\n");
+  const nextLine = startLine + parts.length - 1;
+  const nextColumn = parts.length > 1 ? parts.at(-1)!.length : startColumn + page.length;
+  const truncated = nextLine < lines.length || nextColumn < lines.at(-1)!.length;
+  return { content: page, startLine, startColumn, totalLines: lines.length, truncated, next: truncated ? { startLine: nextLine, startColumn: nextColumn } : null };
+}
+
+function literalSearch(workspace: TraceWorkspace, query: string, signal: AbortSignal, path = ".", offset = 0, limit = 40) {
+  const hits: Array<{ file: string; line: number; column: number; text: string; textTruncated: boolean }> = [];
+  let matched = 0;
+  let bytes = 0;
+  for (const file of listDirTool(workspace.dir, path)) {
+    signal.throwIfAborted();
     if (file.endsWith("/")) continue;
     let content: string;
-    try { content = readFileTool(workspace.dir, file); }
+    try { content = repositoryText(workspace, file); }
     catch { continue; }
     for (const [index, line] of content.split("\n").entries()) {
-      if (!line.includes(query)) continue;
-      hits.push({ file, line: index + 1, text: line.slice(0, 300) });
-      if (hits.length === 200) return hits;
+      const match = line.indexOf(query);
+      if (match < 0 || matched++ < offset) continue;
+      let column = Math.max(0, match - 80);
+      if (column > 0 && /[\uDC00-\uDFFF]/.test(line[column] ?? "")) column--;
+      const text = textPage(line.slice(column), Math.max(700, Buffer.byteLength(JSON.stringify(query)) - 2 + 480));
+      const hit = { file, line: index + 1, column, text, textTruncated: column > 0 || text.length < line.length };
+      const size = Buffer.byteLength(JSON.stringify(hit));
+      if (size > SEARCH_PAGE_BYTES) throw new Error("matching repository path exceeds the search page limit");
+      if (hits.length && (hits.length >= limit || bytes + size > SEARCH_PAGE_BYTES)) return { hits, truncated: true, nextOffset: offset + hits.length };
+      hits.push(hit); bytes += size;
     }
   }
-  return hits;
+  return { hits, truncated: false, nextOffset: null };
 }
 
 function readTools(
@@ -79,36 +141,46 @@ function readTools(
   return [
     defineTool(
       "read_file",
-      "Read a UTF-8 repository file. Args: { path }.",
-      z.object({ path: z.string().min(1).max(500) }),
-      ({ path }) => queue.run(() => {
+      "Read a bounded page of repository text (default 120 lines, at most 12 KB serialized content). Lines start at 1, columns are zero-based UTF-16 offsets. When truncated, pass the returned next cursor to continue, including within long/minified lines. Args: { path, startLine?, startColumn?, maxLines? }.",
+      z.object({ path: z.string().min(1).max(500), startLine: z.number().int().min(1).optional(), startColumn: z.number().int().min(0).optional(), maxLines: z.number().int().min(1).max(400).optional() }),
+      ({ path, startLine, startColumn, maxLines }) => queue.run(() => {
         signal.throwIfAborted();
         trace.requireReady();
-        const content = readFileTool(workspace.dir, path);
+        const page = readPage(repositoryText(workspace, path), startLine, startColumn, maxLines);
         trace.observe([path]);
-        return { content };
+        return page;
       }),
     ),
     defineTool(
       "list_dir",
-      "List repository files below a path, or the whole repository when omitted. Args: { path? }.",
-      z.object({ path: z.string().min(1).max(500).optional() }),
-      ({ path }) => queue.run(() => {
+      "List a bounded page of repository paths (default 100, at most 8 KB). Pass nextOffset as offset to continue. Listing paths does not establish source evidence. Args: { path?, offset?, limit? }.",
+      z.object({ path: z.string().min(1).max(500).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(200).optional() }),
+      ({ path, offset = 0, limit = 100 }) => queue.run(() => {
         signal.throwIfAborted();
         trace.requireReady();
-        return { entries: listDirTool(workspace.dir, path ?? ".") };
+        const all = listDirTool(workspace.dir, path ?? ".");
+        const entries: string[] = [];
+        let bytes = 0;
+        for (const entry of all.slice(offset, offset + limit)) {
+          const size = Buffer.byteLength(JSON.stringify(entry));
+          if (size > LIST_PAGE_BYTES) throw new Error("repository path exceeds the directory page limit");
+          if (entries.length && bytes + size > LIST_PAGE_BYTES) break;
+          entries.push(entry); bytes += size;
+        }
+        const truncated = offset + entries.length < all.length;
+        return { entries, totalEntries: all.length, truncated, nextOffset: truncated ? offset + entries.length : null };
       }),
     ),
     defineTool(
       "grep",
-      "Search repository text for a literal substring. Args: { pattern }.",
-      z.object({ pattern: z.string().min(1).max(500) }),
-      ({ pattern }) => queue.run(() => {
+      "Search for a literal substring, optionally scoped to a file/directory path. Returns at most 40 matching lines by default and 8 KB of snippets, with one hit per matching line. Pass nextOffset as offset to continue. Snippets include zero-based column and textTruncated; read_file can inspect the full line. Args: { pattern, path?, offset?, limit? }.",
+      z.object({ pattern: z.string().min(1).max(500), path: z.string().min(1).max(500).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() }),
+      ({ pattern, path, offset, limit }) => queue.run(() => {
         signal.throwIfAborted();
         trace.requireReady();
-        const hits = literalSearch(workspace, pattern);
-        trace.observe(hits.map(hit => hit.file));
-        return { hits };
+        const page = literalSearch(workspace, pattern, signal, path, offset, limit);
+        trace.observe(page.hits.map(hit => hit.file));
+        return page;
       }),
     ),
   ];
@@ -120,10 +192,11 @@ export function buildLocalReviewTools(workspace: LocalWorkspace, signal: AbortSi
   return [...trace.tools, ...readTools(workspace, signal, queue, trace)];
 }
 
-export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortSignal, onEvent: (event: EventInput) => void, remediate = false) {
+export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortSignal, onEvent: (event: EventInput) => void, remediate = false, role: "red" | "blue" = "blue") {
   const queue = new SerialToolQueue();
-  const stage = remediate ? "PATCH" : "REVIEW";
-  const trace = createAgentTrace({ workspace, signal, onEvent, role: "blue", stage, skills: remediate ? SOURCE_REPAIR_SKILLS : REPOSITORY_REVIEW_SKILLS, enqueue: operation => queue.run(operation) });
+  const canEdit = remediate && role === "blue";
+  const stage = canEdit ? "PATCH" : "REVIEW";
+  const trace = createAgentTrace({ workspace, signal, onEvent, role, stage, skills: canEdit ? SOURCE_REPAIR_SKILLS : REPOSITORY_REVIEW_SKILLS, enqueue: operation => queue.run(operation) });
   const findings = new Map<string, Omit<FindingReportedEvent, "runId" | "seq" | "ts">>();
   const changeFindings = new Map<string, string[]>();
   let inspectedPatch: string | undefined;
@@ -142,23 +215,25 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
       if (!context?.callId) throw new Error("a logged call is required");
       if (findings.size >= 30 && !findings.has(finding.id)) throw new Error("finding limit reached");
       const { id, ...details } = finding;
-      const event = { type: "finding_reported", findingId: id, ...details, callId: context.callId, agentRole: "blue", stage } as const;
+      const event = { type: "finding_reported", findingId: id, ...details, callId: context.callId, agentRole: role, stage } as const;
       findings.set(id, event); onEvent(event);
       return { recorded: true, findingId: id };
     }),
   }];
-  if (remediate) {
+  if (canEdit) {
     const repair = workspace as LocalWorkspace;
-    tools.push(defineTool("write_file", "Apply a minimal application source change for a confirmed finding. Provide findingId when adding a file or changing a related file outside the finding's evidence. Requires source-remediation skill. Tests and configuration are protected.", z.object({ path: z.string().min(1).max(500), content: z.string().max(2_000_000), findingId: z.string().max(60).optional() }), ({ path, content, findingId }) => queue.run(() => {
+    const applySourceChange = (path: string, findingId: string | undefined, content: () => string) => {
       signal.throwIfAborted(); trace.requireReady();
       if (trace.activeSkill() !== "source-remediation") throw new Error("load source-remediation before editing");
       if (!isLocalSourcePath(repair, path)) throw new Error(`only application source files may be edited: ${path}`);
       const related = [...findings.values()].filter(f => f.confidence === "confirmed" && f.severity !== "info" && (findingId ? f.findingId === findingId : f.evidence.includes(path)));
       if (!related.length) throw new Error("record a confirmed source-backed finding for this file or supply its findingId before editing");
-      writeLocalSource(repair, path, content); trace.observe([path], true); inspectedPatch = undefined;
+      writeLocalSource(repair, path, content()); trace.observe([path], true); inspectedPatch = undefined;
       changeFindings.set(path, related.map(f => f.findingId));
       return { ok: true, path, findingIds: changeFindings.get(path) };
-    })));
+    };
+    tools.push(defineTool("write_file", "Apply a minimal application source change for a confirmed finding. Provide findingId when adding a file or changing a related file outside the finding's evidence. Requires source-remediation skill. Tests and configuration are protected. Prefer edit_file for an existing large file.", z.object({ path: z.string().min(1).max(500), content: z.string().max(2_000_000), findingId: z.string().max(60).optional() }), ({ path, content, findingId }) => queue.run(() => applySourceChange(path, findingId, () => content))));
+    tools.push(defineTool("edit_file", "Replace exactly one literal oldText occurrence with newText in existing application source, preserving the rest of the file. Read the relevant page first. Rejects missing or ambiguous matches. Requires a confirmed finding and source-remediation skill; tests and configuration remain protected. Args: { path, oldText, newText, findingId? }.", editSchema, ({ path, oldText, newText, findingId }) => queue.run(() => applySourceChange(path, findingId, () => replaceExact(repositoryText(workspace, path), oldText, newText)))));
     tools.push(defineTool("inspect_diff", "Inspect the exact candidate diff and enforce protected file boundaries. Does not run tests or prove the patch correct. Requires change-validation skill.", z.object({}), () => queue.run(async () => {
       signal.throwIfAborted(); trace.requireReady();
       if (trace.activeSkill() !== "change-validation") throw new Error("load change-validation before inspecting the final diff");
@@ -166,7 +241,7 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
       return { ...diff, checks: { protectedFilesUnchanged: true, testsRun: false } };
     })));
   }
-  return { tools, drain: () => queue.drain(), findings: () => [...findings.values()], inspectedPatch: () => inspectedPatch, changeFindings: () => Object.fromEntries(changeFindings) };
+  return { tools, drain: () => queue.drain(), findings: () => [...findings.values()], observedFiles: () => trace.observedFiles(), inspectedPatch: () => inspectedPatch, changeFindings: () => Object.fromEntries(changeFindings) };
 }
 
 export interface LocalRepairToolset {
@@ -187,6 +262,18 @@ export function buildLocalRepairTools(options: LocalToolOptions): LocalRepairToo
         options.signal.throwIfAborted();
         trace.requireReady();
         writeLocalSource(options.workspace, path, content);
+        trace.observe([path], true);
+        return { ok: true, path };
+      }),
+    ),
+    defineTool(
+      "edit_file",
+      "Replace exactly one literal oldText occurrence with newText in an existing application source file, preserving all other content. Read the relevant page first; missing or ambiguous matches are rejected. Tests and configuration are protected. Args: { path, oldText, newText }.",
+      editSchema.omit({ findingId: true }),
+      ({ path, oldText, newText }) => queue.run(() => {
+        options.signal.throwIfAborted(); trace.requireReady();
+        if (!isLocalSourcePath(options.workspace, path)) throw new Error(`only application source files may be edited: ${path}`);
+        writeLocalSource(options.workspace, path, replaceExact(repositoryText(options.workspace, path), oldText, newText));
         trace.observe([path], true);
         return { ok: true, path };
       }),

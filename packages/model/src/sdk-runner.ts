@@ -77,6 +77,9 @@ export class SdkRunner implements AgentRunner {
     let steps = 0;
     try {
       budget.check();
+      const outputLimit = input.maxOutputTokens ?? 8192;
+      if (!Number.isSafeInteger(outputLimit) || outputLimit <= 0 || outputLimit > 8192) throw new Error("maxOutputTokens must be an integer between 1 and 8192");
+      if (input.handoffAfter && ![input.handoffAfter.tokens, input.handoffAfter.steps].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error("handoffAfter allowances must be positive safe integers");
       const resolved = this.resolve(input.model);
       if (typeof resolved === "string") throw new Error("ModelResolver must return an explicit provider model");
       const model = wrapLanguageModel({
@@ -88,7 +91,7 @@ export class SdkRunner implements AgentRunner {
             budget.requireTokens(estimatedInputTokens + 1);
             return {
               ...params,
-              maxOutputTokens: Math.min(params.maxOutputTokens ?? 8192, 8192, budget.remainingTokens - estimatedInputTokens),
+              maxOutputTokens: Math.min(params.maxOutputTokens ?? outputLimit, outputLimit, budget.remainingTokens - estimatedInputTokens),
               abortSignal: budget.signal,
             };
           },
@@ -170,7 +173,17 @@ export class SdkRunner implements AgentRunner {
         seed: input.seed,
         maxRetries: 0,
         abortSignal: budget.signal,
-        maxOutputTokens: Math.min(8192, budget.remainingTokens),
+        maxOutputTokens: Math.min(outputLimit, budget.remainingTokens),
+        prepareStep: () => {
+          if (!input.handoffAfter || steps === 0 || (steps < input.handoffAfter.steps && inputTokens + outputTokens < input.handoffAfter.tokens)) return;
+          budget.check();
+          input.onEvent({ type: "action_summary", summary: "Investigation allowance reached; preparing a source handoff with the evidence already observed.", ...eventContext(input) });
+          return {
+            activeTools: [],
+            toolChoice: "none",
+            system: `${input.system}\n\nThe investigation allowance for this role is complete. No further tools are available in this response. Return a concise final handoff using only source you actually observed. Identify supported observations, candidate findings, existing safeguards and unread paths or unresolved questions. Do not invent findings or claim the review is comprehensive. The next role will independently validate the source.`,
+          };
+        },
         // A tool call made on the final allowed model step may still complete;
         // the harness can verify its effects without forcing an N+1 response.
         stopWhen: () => budget.remainingSteps === 0,
