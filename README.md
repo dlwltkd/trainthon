@@ -1,25 +1,23 @@
 # Vouch
 
-**Every security fix, proven.**
+**Security repair with reviewable test evidence.**
 
-Vouch is an AI security agent that reproduces a vulnerability with a working exploit,
-patches it, verifies the exploit no longer fires while normal behavior still passes, and
-opens a draft PR with that evidence attached. If it cannot prove a vulnerability, it does
-not change your code.
+Vouch is a CLI harness that takes a security report and a regression test for a local
+Git repository, prepares a candidate patch, and records its before/after test results.
+The implemented MVP exports the patch, test evidence, and agent activity for review.
+The repository UI, GitHub connection, QR audience flow, and draft PR creation are planned.
 
 ## Why Vouch
 
-Tools like GitHub Copilot Autofix will *claim* a fix. Vouch **proves** it — and, just as
-important, refuses to touch code when the reported issue cannot be reproduced. For a small
-team without a dedicated security engineer, the value is a fix you can trust and a decision
-you can audit.
+- **Before/after evidence** — preserve the supplied regression and functional test
+  inventories, then run them against the candidate in a fresh snapshot.
+- **Bounded repair** — allow application-source edits within shared model, step, and
+  time budgets. Stop without a patch when the supplied regression does not reproduce.
+- **Reviewable runs** — retain the diff, structured test results, model configuration,
+  usage, and correlated tool events after cleanup.
 
-- **Proof-carrying fixes** — a Red step writes an exploit that demonstrates the bug; a fix
-  is only "verified" when that exploit is neutralized *and* functional tests still pass.
-- **Restraint** — already-fixed code and non-applicable alerts result in zero changes, with
-  a reasoned "not reproducible" verdict.
-- **The PR is the audit trail** — diff, before/after tests, the exploit-as-regression-test,
-  time and cost, all in one reviewable pull request.
+The planned benchmark compares models with and without the harness. No measured
+security-performance improvement is claimed yet.
 
 ## How it's built
 
@@ -29,7 +27,8 @@ Three layers, three packages, so the benchmark can toggle them cleanly:
 - `packages/engine` — state machine, Red/Blue orchestration, budgets, completion gate (the HARNESS layer)
 - `packages/sandbox` — isolated worktree, test execution (the SANDBOX layer)
 
-The same execution engine powers both the product (Studio) and the benchmark (Bench).
+The engine has local-repository and prepared-benchmark entry points. Studio and Bench
+interfaces are planned.
 
 See [`HARNESS_PLAN.md`](./HARNESS_PLAN.md) for the full build spec, benchmark protocol, and milestones.
 See [`HACKATHON_MVP.md`](./HACKATHON_MVP.md) for the proposed hackathon scope,
@@ -59,15 +58,18 @@ pnpm cli run \
 
 Use `--mode live` with an explicit model/provider and its API key to let the
 repair agent edit source. The optional `VOUCH_RED_*` Routeway settings enable a
-read-only GLM evidence review before Blue repairs the code.
+read-only GLM evidence review before Blue repairs the code. The compatible-provider
+path has mock coverage; a live Routeway smoke test still requires an API key.
 
 Local runs snapshot the requested commit, overlay the supplied regression,
 install the project's locked dependencies in Docker, and run tests without
-network access. Only JS/TS application source can change. A verified result
-requires the exact regression and the functional suite to pass in a fresh copy.
+network access. Only JS/TS application source can change. Local success is
+`TESTS_PASSED`, with verification scope `repository_tests` and
+`independentGrader: false`. It requires the exact regression and the functional
+suite to pass in a fresh copy; it is never reported as `FIXED_VERIFIED`.
 Artifacts are written below `runs/<runId>/` before cleanup.
 
-This slice supports Node projects with one npm or pnpm lockfile, Vitest 3–5,
+This slice supports Node projects with one npm or pnpm lockfile, Vitest 4–5,
 and Vite 6.1 or newer. It requires Node 22+, pnpm, Git, and Docker.
 Functional tests must live in conventional protected test paths; a collected
 test outside those paths is rejected during setup.
@@ -80,9 +82,15 @@ evidence through a bounded output channel, and use a read-only repository mount.
 pinned container digest, package-manager and Vitest/Vite versions, lockfile hash,
 resolved input hash, and before/after test manifests.
 
-The local MVP is for a repository and lockfile controlled by the person running
-Vouch. It executes that repository's locked Vitest package and test config, so
-its evidence is not an attestation against a deliberately malicious repository
-or config. Application modules imported by tests remain application code and can
-be repaired; the assertions only prove the behavior they cover. The frozen
-benchmark uses a separate hidden grader for performance claims.
+The local MVP assumes the owner trusts the selected commit, lockfile, test runner,
+and tests. It uses immutable harness-owned test options: executable repository
+Vitest/Vite configs and environment files are disabled, and PostCSS receives an
+empty inline configuration. Config-defined plugins, setup files, aliases, and
+custom test patterns are outside this slice.
+
+Editable application source runs in the same Vitest worker as the assertions. It
+can overfit visible tests or alter assertion behavior, so passing results require
+code review and are not proof of a security fix. The separate hidden grader is
+available only on the benchmark path. Hiding tests does not prevent same-runtime
+tampering; isolating grader control from candidate code for adversarial evaluation
+remains future work. Local results do not count as benchmark performance.

@@ -2,10 +2,12 @@
 
 Proposed build scope, based on the current CLI harness. This narrows the broader
 [HARNESS_PLAN.md](./HARNESS_PLAN.md); the benchmark below has not been run.
+The local CLI slice is implemented. The UI, QR flow, GitHub integration, and draft
+PR creation described below remain planned.
 
-**Pitch:** Vouch turns a security report into a reproduced vulnerability, a tested
-patch, and a reviewable evidence bundle. A paired benchmark measures how much the
-harness improves the same model's security repair performance.
+**Pitch:** Vouch turns a security report and regression test into a candidate patch
+and reviewable before/after evidence. A planned paired benchmark will measure
+whether the harness improves the same model's security repair performance.
 
 ## Product: Run, Bench, and a QR audience experience
 
@@ -14,7 +16,7 @@ harness improves the same model's security repair performance.
 | Join | Scan the presentation QR on a phone, connect a repository the participant already owns, and start checking its actual code in that repository's GitHub Actions. |
 | Run | Keep the participant's actual repository visible alongside a live agent activity feed, tool calls, skills/guidance, file changes, and verification results. |
 | Bench | Compare each model with and without Vouch; show verified fixes, unnecessary changes, regressions, time, and cost. Open any result to inspect its run. |
-| Evidence | Export the patch, regression test, before/after test output, model configuration, and run log. Create a draft PR in the participant's selected repository or the presenter's configured fork once the fix is verified. |
+| Evidence | Export the patch, regression test, before/after test output, model configuration, and run log. Create a draft PR for review in the selected repository once the required tests pass, with the scope and limits of those results visible. |
 
 Use the existing TypeScript engine, a local Hono API with SSE, and a React/Vite
 interface. Keep JSONL as the record of each run. Prepared local targets remain the
@@ -95,7 +97,8 @@ This experience is part of the Run-view milestone, not a final cosmetic pass.
 
 **Required demo feature:** an attendee selects an existing project they own and
 Vouch checks that project's actual code and dependencies. They leave with an
-Actions run and, when a fix verifies, a draft PR against the selected revision.
+Actions run and, when a candidate passes the required tests, a draft PR against
+the selected revision.
 Creating a sample repository is not part of this audience flow; fixtures remain
 bench and internal rehearsal assets. The presentation QR opens a
 public HTTPS Join page that works on mobile data. It contains an event URL, never
@@ -123,7 +126,7 @@ The mobile flow is:
    selected project. Run in that repository's GitHub-hosted Actions environment.
    Show its real GitHub run link and Queue → Inspect → Reproduce → Patch → Verify
    on the phone. Refreshing the page reconnects to that run.
-5. **Keep the result.** A verified fix opens a draft PR with the patch, regression
+5. **Keep the result.** A candidate that passes tests opens a draft PR with the patch, regression
    test, before/after results, and Actions link. No reproduction produces a report
    and no patch. If the checks find no applicable issue, show their coverage and
    "No confirmed finding". Unsupported setup, failed verification, and timeouts remain
@@ -151,7 +154,8 @@ Keep the implementation bounded:
 - Existing-repository runs use supported check results or the supplied report,
   plus protected project tests. Findings are unknown until investigated.
   They have no benchmark ground-truth grader, so describe exactly what was tested
-  and keep their results outside the frozen benchmark scores.
+  and keep their results outside the frozen benchmark scores. Label successful
+  local checks `TESTS_PASSED`, not `FIXED_VERIFIED`, and require code review.
 
 The App permissions and dispatch integration must be implemented explicitly.
 Returning PRs through the backend App avoids depending on a repository allowing
@@ -172,15 +176,23 @@ and correlated event log before cleanup. Records bind the run to the commit,
 regression, lockfile, pinned image, runner versions, and exact test inventories.
 Dependency preparation rejects install scripts and local/custom package sources;
 dependency extraction has a size/entry monitor, and tests run offline with bounded
-structured output. It does not load a benchmark task
-or hidden grader.
+structured output. It does not load a benchmark task or hidden grader. Local
+success is `TESTS_PASSED`, with verification scope `repository_tests` and
+`independentGrader: false`; this path never emits `FIXED_VERIFIED`.
 
 This local slice assumes the repository owner trusts the selected commit,
-lockfile, Vitest dependency, and test configuration. Those project-controlled
-components execute during verification, so the artifact is observable test
-evidence rather than a cryptographic attestation against a hostile repository.
-The exact supplied test and conventional test files are immutable, while normal
-application modules they import remain editable so a repair is possible.
+lockfile, Vitest dependency, and tests. Executable repository Vitest and Vite
+configuration and environment files are disabled; immutable harness options drive
+collection and execution, including an empty inline PostCSS configuration.
+This slice supports Vitest 4–5 and Vite 6.1 or newer. Config-defined
+plugins, setup files, aliases, and custom test patterns are therefore outside the
+current slice. The exact supplied test and conventional test files are immutable.
+Editable application modules still share the Vitest worker with assertions: they
+can overfit visible checks or alter assertion behavior. Test passes therefore
+require code review and do not prove a security fix or benchmark improvement.
+Only the benchmark path has a separate hidden grader. Hidden tests alone do not
+stop candidate code from tampering with its runtime; isolating grader control
+from candidate execution for adversarial evaluation remains future work.
 
 The GitHub-hosted product path still needs these integration changes:
 
@@ -204,17 +216,18 @@ Acceptance: two participants each connect a different existing compatible projec
 with no Vouch-specific task files, complete setup, and run checks on its actual
 source without entering model keys. Include a private repository with supported
 account permissions. Real Actions links open in the owning accounts; an applicable
-verified fix produces a draft PR there, and no confirmed issue produces a report
-with no source patch. Refresh preserves progress. Rehearse
+candidate that passes tests produces a draft PR there, and no confirmed issue
+produces a report with no source patch. Refresh preserves progress. Rehearse
 queued, blocked, and unsuccessful runs as well as the successful path. The QR
 feature is specified here; its app, workflow, proxy, and deployed URL still need
 implementation.
 
 ## Models
 
-The product configuration uses **GLM 5.3 Flash Uncensored via Routeway for Red** and
+The planned product configuration pairs **GLM 5.3 Flash Uncensored via Routeway for Red** with
 an available coding model through the existing Anthropic/OpenAI adapter for Blue.
-Pin Blue's exact model ID before evaluation.
+The local CLI's optional Red role reviews the supplied report and test evidence
+with read-only tools. Pin Blue's exact model ID before evaluation.
 
 Routeway lists `glm-5.3-flash-uncensored`, function calling, and the API base URL
 `https://api.routeway.ai/v1`. It describes the model as a community refusal-reduced
@@ -231,9 +244,9 @@ VOUCH_RED_API_KEY_ENV=ROUTEWAY_API_KEY
 ```
 
 Set `ROUTEWAY_API_KEY` locally. The compatible-provider loop and strict model
-selection are covered by mock-provider tests; a credentialed Routeway run still
-needs validation. Record the actual provider and model for every role; benchmark runs
-must fail configuration checks if a requested model is unavailable, rather than
+selection are covered by mock-provider tests. A live Routeway smoke test remains
+unvalidated because no API key was available. Record the actual provider and model
+for every role; benchmark runs must fail configuration checks if a requested model is unavailable, rather than
 falling back to another provider or a scripted solution.
 
 ## Benchmark selection
@@ -291,6 +304,11 @@ model IDs, prompts, tool schema, budgets, and grader before final evaluation.
 
 ## Scoring and presentation
 
+These are planned benchmark metrics, not scores from local repository runs. The
+benchmark path has hidden grader assets, but an adversarial evaluation also needs
+grader control isolated from candidate code; hiding tests in a shared runtime is
+insufficient. Complete and validate that boundary before making such claims.
+
 - **Verified fix rate:** hidden security tests and held-out functional tests pass,
   divided by all vulnerable task runs. Grade the actual patch independently of
   the agent's claimed outcome.
@@ -328,7 +346,9 @@ the denominator, and cost. A large gain is a goal, not a result to assume.
    alone does not provide that isolation.
 3. **Build the eval runner.** Load a frozen task manifest, schedule paired runs,
    persist all outcomes, apply independent grading, and export metrics. Verify
-   both vulnerable and fixed references before admitting a case.
+   both vulnerable and fixed references before admitting a case. Isolate grader
+   control from candidate execution before treating results as resistant to runtime
+   tampering.
 4. **Build Run and Bench.** Treat the repository workspace and clean agent
    activity view as core deliverables: real files, correlated tool calls,
    skills/guidance, live diffs, and verification evidence. Use recorded events for

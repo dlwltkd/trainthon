@@ -1,13 +1,13 @@
 # Vouch — 확정 빌드 스펙
 
-**제품명: Vouch** ("Every security fix, proven.") — 내부적으로 이 실행 시스템을 agent harness라 부른다.
-차별화 축은 **"증명(익스플로잇)이 붙은 것만 고치고, 증명 못 하면 안 고친다"** 이다.
+**제품명: Vouch** — 보안 리포트와 회귀 테스트를 받아 수정 후보와 전후 테스트 근거를 남기는 agent harness.
+현재 구현은 로컬 CLI다. UI·QR·GitHub 연결·draft PR 생성은 아래의 후속 계획이다.
 
 ## 한 줄 claim (숫자가 증명할 것)
 
-같은 모델을, 같은 정보·도구·예산으로 돌렸을 때, HARNESS는 검증된 수정률을 유지·향상하면서
-**불필요·유해한 수정을 크게 줄인다**. 헤드라인은 2D 산점도(세로 검증수정률↑, 가로 과잉수정률↓)에서
-C(HARNESS)가 B(기본 에이전트)를 좌상단으로 지배하는 그림.
+같은 모델을, 같은 정보·도구·예산으로 돌렸을 때, HARNESS가 검증된 수정률을 유지·향상하면서
+불필요·유해한 수정을 줄이는지 측정한다. 아직 성능 향상을 입증한 벤치마크 결과는 없다.
+목표 차트는 2D 산점도(세로 검증수정률↑, 가로 과잉수정률↓)의 B(기본 에이전트)와 C(HARNESS) 비교다.
 
 ## 락된 결정
 
@@ -17,7 +17,7 @@ C(HARNESS)가 B(기본 에이전트)를 좌상단으로 지배하는 그림.
 | 모델 | Claude Sonnet, B·C 동일. Vercel AI SDK |
 | 반복 | 조건별 3회 |
 | 과제 총량 | 12 = dev 4 + eval 8 (eval V 5 + C 3, V 중 실제 CVE 2 + 통제앱 3) |
-| Sandbox | 로컬 git worktree + 자식 프로세스 vitest, 시간/자원 상한. Modal은 P3 |
+| Sandbox | 로컬 저장소 경로는 고정 Docker 이미지 + 잠금파일 설치 + 오프라인 Vitest. 기존 벤치 경로는 worktree + 자식 프로세스이며 채점기 런타임 격리는 후속 작업 |
 | 저장 | JSONL append-only 이벤트 로그 + runs/. DB 없음 |
 | 실시간 | Hono SSE |
 | PR | 발표자 fork 또는 참가자가 연결한 자기 저장소에 draft PR. 업스트림은 스트레치 |
@@ -49,9 +49,10 @@ runs/<run_id>.jsonl
 - 게이트웨이는 **범용 OpenAI-호환 프로바이더 하나**로 처리한다(baseURL + key). Routeway
   (`https://api.routeway.ai/v1`), Vercel AI Gateway, OpenRouter, z.ai가 전부 같은 방식으로 붙는다.
   네이티브 `anthropic`/`openai`도 유지.
-- **역할별 모델**(`ModelSpec`): 조건 C의 Red(공격/익스플로잇 작성)와 Blue(패치)는 서로 다른 모델을
-  쓸 수 있다. 안전튜닝된 프런티어 모델은 PoC 작성을 거부(refusal)하는 경우가 있어, Red는 덜 제한적인
-  모델(예: Routeway 호스팅 GLM/uncensored 계열)로 라우팅한다. Blue는 프런티어 모델.
+- **역할별 모델**(`ModelSpec`): Red와 Blue(패치)는 서로 다른 모델을 쓸 수 있다.
+  로컬 CLI의 Red는 제공된 리포트와 테스트 근거를 읽기 전용 도구로 검토한다.
+  제품 모델 계획은 Routeway의 GLM 5.3 Flash Uncensored Red + 코딩 모델 Blue이며,
+  모델 이름이나 거부율만으로 보안 성능을 판단하지 않는다.
 - 안전 범위: 익스플로잇은 **sandbox 안의 fixture/발표자 fork/참가자가 연결한 저장소 코드에만** 실행한다. 운영 시스템 대상
   공격이나 무단 스캔은 없다. Red에 덜 제한적인 모델을 쓰는 것은 이 통제된 범위 안에서만 정당하다.
 - B vs C 공정성: Red 모델을 바꾸는 것은 조건 C의 구성일 뿐, baseline B에도 동일 정보·도구·예산을
@@ -70,7 +71,12 @@ INIT → CONTEXT → REPRODUCE → PATCH → VERIFY → REVIEW → DONE
 BROKE_FUNCTION / BUDGET_TIMEOUT / CANCELLED / SETUP_ERROR /
 INVALID_REPRODUCTION / INFRA_ERROR.
 
-**완료 게이트(C):** FIXED_VERIFIED는 Red 익스플로잇이 이제 실패(취약점 죽음) AND 기능 테스트 통과일 때만.
+위 상태와 아래 B/C 비교는 기존 벤치 경로 기준이다. 로컬 저장소 성공 상태는
+`TESTS_PASSED`이며 검증 범위는 `repository_tests`, `independentGrader: false`다.
+로컬 경로는 `FIXED_VERIFIED`를 반환하지 않는다.
+
+**벤치 완료 게이트(C):** 회귀 테스트와 기능 테스트가 모두 통과해야 완료 후보가 된다.
+`FIXED_VERIFIED`는 기존 벤치 채점 결과 이름이며 모든 보안 동작에 대한 증명을 뜻하지 않는다.
 Red가 예산 내 트리거 못 만들면 → NOT_REPRODUCIBLE, 변경 0줄. 대조 과제도 같은 게이트로 자동 처리.
 
 도구(B·C 동일): read_file, list_dir, grep, write_file/apply_patch, run_tests(vitest), run_cmd.
@@ -85,7 +91,8 @@ Red가 예산 내 트리거 못 만들면 → NOT_REPRODUCIBLE, 변경 0줄. 대
 | 예산·도구·모델·리포트 | 동일 | 동일 |
 | 채점 | 외부·숨김·동일 | 외부·숨김·동일 |
 
-유일한 차이는 오케스트레이션. 능력 차이 없음.
+현재 B/C는 보안 프롬프트도 다르므로 전체 시스템 효과를 비교한다.
+오케스트레이션만의 효과는 동일 프롬프트를 쓰는 별도 ablation으로 측정한다.
 
 ## 지표 (분모 V/C 분리)
 
@@ -100,6 +107,8 @@ Red가 예산 내 트리거 못 만들면 → NOT_REPRODUCIBLE, 변경 0줄. 대
 - 실행 매트릭스: eval 8 × {B,C} × 3 = 48회. sandbox 4개 병렬, 실행당 8분 상한.
 - dev/eval 분리: dev 4로만 튜닝, eval 8은 마지막 1회. eval 전 preregistration.md 커밋.
 - 오염 방지: 채점기 exploit()는 숨김, Red 익스플로잇(게이트용)과 분리. 에이전트는 수정 커밋/숨은 테스트 못 봄.
+- 숨은 grader는 벤치 경로에만 있다. 테스트를 숨겨도 후보 코드와 같은 런타임에서 실행하면
+  assertion 변조를 막지 못한다. 적대적 후보까지 평가하려면 채점기 제어를 후보 실행과 격리하는 후속 작업이 필요하다.
 - 실패 실행 조용히 제외 금지. 인프라 오류 재실행 규칙 B·C 동일.
 
 ## 데모
@@ -118,7 +127,7 @@ Red가 예산 내 트리거 못 만들면 → NOT_REPRODUCIBLE, 변경 0줄. 대
 - 흐름: Red 익스플로잇(빨강) → Blue 패치 → Verify → 내 fork에 draft PR(증거 표).
 - 관객 참여(필수): 발표 QR → 모바일 Join → GitHub 연결 → 참가자가 기존에 쓰던 자기
   저장소 선택 → 그 저장소의 실제 코드·의존성을 GitHub Actions에서 점검 → 휴대폰에서
-  실행 결과와 검증된 수정 PR 열기. 샘플 저장소 생성은 관객 체험 경로에서 제외한다.
+  실행 결과와 테스트를 통과한 수정 후보 PR 열기. 샘플 저장소 생성은 관객 체험 경로에서 제외한다.
 - 첫 지원 범위는 설치 가능한 lockfile과 Vitest 테스트가 있는 Node 기반 JS/TS 저장소.
   의존성 보안 권고·지원하는 정적 점검 또는 사용자가 제공한 리포트에서 시작한다.
   워크플로가 없으면 설치 PR을 기본 브랜치에 병합한 뒤 실행한다. 실제 저장소에 문제가
@@ -132,11 +141,24 @@ Red가 예산 내 트리거 못 만들면 → NOT_REPRODUCIBLE, 변경 0줄. 대
   만들고 참가자가 검토·병합한다. 운영 서버 배포는 포함하지 않는다.
 
 QR 체험의 상세 흐름·설치 제약·완료 기준은 [HACKATHON_MVP.md](./HACKATHON_MVP.md)에 정리한다.
-현재 QR 화면, GitHub 연결, Actions 실행, 모델 프록시는 구현 전이다.
+현재 UI, QR 화면, GitHub 연결, Actions 실행, 모델 프록시, draft PR 생성은 구현 전이다.
+
+## 현재 로컬 harness의 범위
+
+- 로컬 Git 커밋, 제공 리포트, 지정 회귀 테스트를 입력으로 받는다. 원본 커밋을 보존하고
+  JS/TS 애플리케이션 소스만 수정하며 새 복사본에서 전후 테스트 목록과 결과를 비교한다.
+- npm 또는 pnpm 잠금파일 하나가 있는 Node 저장소, Vitest 4–5, Vite 6.1 이상을 지원한다.
+  실행 가능한 저장소 Vitest/Vite 설정과 env 파일은 읽지 않고 PostCSS는 빈 인라인 설정을 쓴다.
+  따라서 사용자 설정의 플러그인·setup 파일·alias·테스트 패턴은 지원 범위 밖이다.
+- 소유자가 선택한 커밋·lockfile·테스트 러너·테스트를 신뢰하는 범위다. 변경 가능한 소스는
+  assertion과 같은 Vitest worker에서 실행되어 테스트에 과적합하거나 assertion 동작을 바꿀 수 있다.
+  `TESTS_PASSED`는 관찰된 저장소 테스트 결과이며 코드 리뷰가 필요하다. 보안 수정의 증명이나
+  벤치마크 성능으로 취급하지 않는다.
+- Routeway 호환 프로바이더 경로는 mock 테스트가 있다. API 키가 없어 실호출 smoke test는 남아 있다.
 
 ## 타겟 코드 (전용 데모 앱 없음)
 
-harness는 임의의 코드에 동작한다. 별도 심사 앱을 만들지 않는다. 각 과제는 `bench/tasks/<id>/repo/`에
+harness는 지원하는 Node 저장소와 준비된 벤치 과제에서 동작한다. 별도 심사 앱을 만들지 않는다. 각 과제는 `bench/tasks/<id>/repo/`에
 타겟 코드 사본을 두고, sandbox가 그 사본을 워크트리로 복제해 테스트를 돌린다. 서버 기동 불필요 —
 함수/모듈 수준 단위 테스트로 검증 가능한 CWE를 택한다(prototype pollution, path traversal, ReDoS,
 injection 등).
@@ -153,10 +175,10 @@ injection 등).
 | M0 ✅ | 0–1h | 모노레포+protocol+이벤트 로거+CLI. `cli run --task hello --condition B`가 올바른 JSONL run 기록 생성 |
 | M1 ✅ | 1–3h | sandbox worktree + 도구 + 모델 루프(B). 기본 에이전트가 취약 fixture 수정, grader가 FIXED_VERIFIED |
 | M2 ✅ | 3–5h | harness(C) + Red/Blue + 게이트. C가 V 하나 수정 AND 대조 하나 정답(diff=0). = P0 완료 — `proto-pollution` C→FIXED_VERIFIED, `proto-pollution-fixed` C→NOT_REPRODUCIBLE(diff 0), 스크립트 러너로 검증. 실모델 검증은 키 투입 후 |
-| Local harness ✅ | — | 로컬 Git 커밋 + 제공 리포트/회귀 테스트 입력, 소스 전용 수정, 공유 예산/취소, 고정 Docker 이미지·잠금파일 기반 설치·구조화 Vitest 전후 검증, 테스트 목록 동일성, 상관관계 이벤트와 영구 artifact. 실제 Docker scripted E2E와 테스트 suite로 검증. 저장소 소유자가 선택한 커밋·lockfile·테스트 설정을 신뢰하는 범위이며 Routeway 실키 검증은 남음 |
+| Local harness ✅ | — | 로컬 Git 커밋 + 리포트/회귀 테스트, 소스 전용 수정, 공유 예산/취소, Docker·잠금파일 설치, 전후 테스트 목록·결과, 이벤트와 영구 artifact. 성공은 `TESTS_PASSED` (`repository_tests`, `independentGrader: false`). Docker scripted E2E와 테스트 suite로 실행 경로 확인. 코드 리뷰와 Routeway 실키 검증은 별도 |
 | M3 | 5–7h | SSE + 실제 저장소/파일/diff + 읽기 쉬운 에이전트 활동·도구 호출·스킬/가이드 표시 + 검증 결과 + 모바일/발표 뷰 + replay |
 | M4 | 7–9h | bench 러너 + dev 4개 + 지표. `cli bench --set dev` 지표 표 |
 | M5 | 9–13h | eval 8(실제 CVE 2 fork 포함) + prereg 커밋 + 48회 + 결과 표·차트 + fork draft PR URL |
-| M6 | 13h+ | QR 체험: 참가자 2명이 서로 다른 기존 프로젝트를 연결해 실제 코드 점검·결과 수령. 적용 가능한 수정은 검증된 draft PR, 문제 미확인은 무수정 리포트. 모바일 참여 리허설·영상·발표 |
+| M6 | 13h+ | QR 체험: 참가자 2명이 서로 다른 기존 프로젝트를 연결해 실제 코드 점검·결과 수령. 테스트를 통과한 후보는 리뷰용 draft PR, 문제 미확인은 무수정 리포트. 모바일 참여 리허설·영상·발표 |
 
 **하드 컷오버:** 벽시계 8h에 M2(P0) 안 되면 bench·실제CVE·UI 고도화 버리고 P0 하나만 완벽하게.
