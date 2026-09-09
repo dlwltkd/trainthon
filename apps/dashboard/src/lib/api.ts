@@ -1,4 +1,4 @@
-import type { HarnessEvent, RunStatus } from "@vouch/protocol";
+import type { HarnessEvent, RunStatus, SourceEvaluation } from "@vouch/protocol";
 
 export interface RunSummary {
   runId: string;
@@ -114,6 +114,7 @@ export const api = {
   runs: () => request<RunSummary[]>("/api/runs"),
   run: (id: string) => request<RunPayload>(`/api/runs/${encodeURIComponent(id)}`),
   tasks: () => request<BenchTask[]>("/api/bench/tasks"),
+  evaluations: () => request<SourceEvaluation[]>("/api/evaluations"),
   start: (body: StartRequest) => request<{ runId: string }>("/api/runs", { method: "POST", body: JSON.stringify(body) }),
   cancel: (id: string) => request<{ ok: true }>(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   pullRequest: (id: string) => request<{ url: string; number?: number }>(`/api/runs/${encodeURIComponent(id)}/pull-request`, { method: "POST", body: "{}" }),

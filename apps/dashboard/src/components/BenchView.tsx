@@ -5,6 +5,7 @@ import { formatDuration } from "@/lib/format";
 import { routeHref } from "@/hooks/useHashRoute";
 import { useRuns } from "./RunsHome";
 import { Chip, Mono, Panel, Spinner, StatusChip } from "./ui";
+import { SourceEvaluations } from "./SourceEvaluation";
 
 interface BenchRow extends RunSummary {
   metrics?: GradeEvent["metrics"];
@@ -51,11 +52,14 @@ export function BenchView() {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 sm:p-6">
       <div>
-        <h1 className="text-[1.6em] font-semibold tracking-tight">Bench</h1>
+        <h1 className="text-[1.6em] font-semibold tracking-tight">Evidence</h1>
         <p className="mt-1 max-w-2xl text-ink-2">
-          Recorded benchmark runs grouped by task. B is the plain agent loop, C is the Vouch harness. Grades come from the hidden grader, never from the agent's own claim.
+          Measured comparisons with pinned inputs, recorded failures, and inspectable execution traces.
         </p>
       </div>
+      <SourceEvaluations />
+      <details>
+      <summary className="cursor-pointer text-[0.9em] text-ink-3">Scripted fixture runs · not measured model performance</summary>
       {runs === null ? (
         <div className="flex items-center gap-2 text-ink-3">
           <Spinner /> loading
@@ -116,6 +120,7 @@ export function BenchView() {
           </Panel>
         ))
       )}
+      </details>
     </div>
   );
 }

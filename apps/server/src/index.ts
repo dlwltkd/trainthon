@@ -17,6 +17,7 @@ import { readTaskFile, startRun, type StartRequest } from "./runner.js";
 import { observeRun } from "./stream.js";
 import { createDraftPullRequest } from "./pull-request.js";
 import { isHiddenPath } from "../../../packages/sandbox/src/fs-tools.js";
+import { listSourceEvaluations, readEvaluationArtifact, readSourceEvaluation } from "./evaluations.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const PORT = Number(process.env.VOUCH_SERVER_PORT ?? 8787);
@@ -126,6 +127,16 @@ export function createApp(options: AppOptions = {}) {
       })
       .filter((task) => task !== null);
     return c.json(tasks);
+  });
+
+  app.get("/api/evaluations", c => c.json(listSourceEvaluations(RUNS_DIR)));
+  app.get("/api/evaluations/:id", c => {
+    const evaluation = readSourceEvaluation(RUNS_DIR, c.req.param("id"));
+    return evaluation ? c.json(evaluation) : c.json({ error: "evaluation not found" }, 404);
+  });
+  app.get("/api/evaluations/:id/artifact", c => {
+    const text = readEvaluationArtifact(RUNS_DIR, c.req.param("id"), c.req.query("case") ?? "", c.req.query("arm") ?? "", c.req.query("name") ?? "");
+    return text === null ? c.json({ error: "artifact not found" }, 404) : c.text(text);
   });
 
   app.get("/api/runs", (c) => c.json(registry.list()));
