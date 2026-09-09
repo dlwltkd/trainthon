@@ -1,3 +1,5 @@
+export * from "./evaluation.js";
+
 export type Condition = "A" | "B" | "C";
 export type ExecutionMode = "live" | "scripted";
 export type AgentRole = "solo" | "red" | "blue";

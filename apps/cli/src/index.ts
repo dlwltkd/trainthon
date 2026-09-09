@@ -10,6 +10,7 @@ import { runDoctor } from "./doctor.js";
 import { parseDoctorOptions } from "./doctor-options.js";
 import { parseRunOptions } from "./run-options.js";
 import { createRunProgress } from "./progress.js";
+import { runSourceEvaluation } from "./evaluation.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const BENCH_DIR = resolve(REPO_ROOT, "bench");
@@ -140,8 +141,13 @@ async function main(): Promise<void> {
     await cmdDoctor(flags);
     return;
   }
+  if (command === "eval") {
+    await runSourceEvaluation(flags, REPO_ROOT);
+    return;
+  }
   process.stderr.write(
     "usage:\n" +
+    "  vouch eval --suite cvefixes [--prepare]\n" +
     "  vouch doctor [--live] [--model <id>] [--provider anthropic|openai|compatible] [--base-url <url>] [--api-key-env <name>]\n" +
     "    [--red-model <id>] [--red-provider anthropic|openai|compatible] [--red-base-url <url>] [--red-api-key-env <name>]\n" +
     "  vouch run --repo <local path|https://github.com/owner/repo> --prompt <instructions> [--fix] [--report <file>] [--ref HEAD]\n" +
