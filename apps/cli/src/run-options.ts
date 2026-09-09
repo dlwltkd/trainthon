@@ -1,5 +1,11 @@
 import type { Condition, ExecutionMode } from "@vouch/protocol";
-import { providerForModel, type ModelSpec, type ProviderKind } from "@vouch/model";
+import {
+  PROVIDERS,
+  ROUTEWAY_GLM_FLASH_UNCENSORED,
+  providerForModel,
+  type ModelSpec,
+  type ProviderKind,
+} from "@vouch/model";
 import { getString } from "./args.js";
 
 export type Flags = Record<string, string | boolean>;
@@ -39,7 +45,7 @@ function configuredValue(
 
 export interface LiveRoleModels {
   blue: ModelSpec;
-  red?: ModelSpec;
+  red: ModelSpec;
 }
 
 /** Resolve the exact live role configuration without reading or exposing key values. */
@@ -47,10 +53,8 @@ export function resolveLiveRoleModels(
   flags: Flags,
   env: NodeJS.ProcessEnv = process.env,
 ): LiveRoleModels {
-  const blueModel = configuredValue(flags, "model", env, "VOUCH_BLUE_MODEL");
-  if (!blueModel) {
-    throw new Error("live repository runs require an explicit Blue model via --model or VOUCH_BLUE_MODEL");
-  }
+  const blueModel = configuredValue(flags, "model", env, "VOUCH_BLUE_MODEL")
+    || PROVIDERS.openai.defaultModel;
   const blue: ModelSpec = {
     model: blueModel,
     provider: provider(configuredValue(flags, "provider", env, "VOUCH_BLUE_PROVIDER"), blueModel, "Blue"),
@@ -58,17 +62,11 @@ export function resolveLiveRoleModels(
     apiKeyEnv: configuredValue(flags, "api-key-env", env, "VOUCH_BLUE_API_KEY_ENV"),
   };
 
-  const redModel = configuredValue(flags, "red-model", env, "VOUCH_RED_MODEL");
+  const redModel = configuredValue(flags, "red-model", env, "VOUCH_RED_MODEL")
+    || ROUTEWAY_GLM_FLASH_UNCENSORED;
   const redProvider = configuredValue(flags, "red-provider", env, "VOUCH_RED_PROVIDER");
   const redBaseURL = configuredValue(flags, "red-base-url", env, "VOUCH_RED_BASE_URL");
   const redApiKeyEnv = configuredValue(flags, "red-api-key-env", env, "VOUCH_RED_API_KEY_ENV");
-  if (!redModel) {
-    if ([redProvider, redBaseURL, redApiKeyEnv].some(item => item !== undefined)) {
-      throw new Error("Red provider configuration requires --red-model or VOUCH_RED_MODEL");
-    }
-    return { blue };
-  }
-
   return {
     blue,
     red: {

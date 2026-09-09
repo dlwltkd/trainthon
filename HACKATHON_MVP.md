@@ -225,16 +225,19 @@ implementation.
 ## Models
 
 The planned product configuration pairs **GLM 5.3 Flash Uncensored via Routeway for Red** with
-an available coding model through the existing Anthropic/OpenAI adapter for Blue.
-The local CLI's optional Red role reviews the supplied report and test evidence
-with read-only tools. Pin Blue's exact model ID before evaluation.
+**GPT-5.6 Sol via OpenAI for Blue**.
+The local CLI's Red role reviews the supplied report and test evidence
+with read-only tools. The CLI pins Blue to `gpt-5.6-sol` unless an explicit
+flag or `VOUCH_BLUE_MODEL` override is supplied.
+`gpt-daybreak-blue-latest` is a later Blue option, but it requires separate
+OpenAI Daybreak approval and must pass the same live connection check first.
 
 Routeway lists `glm-5.3-flash-uncensored`, function calling, and the API base URL
 `https://api.routeway.ai/v1`. It describes the model as a community refusal-reduced
 variant. Treat fewer refusals as a hypothesis to test; valid reproductions and
 correct patches determine security performance. [Routeway model page](https://routeway.ai/models/glm-5.3-flash-uncensored)
 
-The current engine already reads these Red settings:
+These optional variables override the pinned Red profile:
 
 ```dotenv
 VOUCH_RED_MODEL=glm-5.3-flash-uncensored
@@ -244,10 +247,14 @@ VOUCH_RED_API_KEY_ENV=ROUTEWAY_API_KEY
 ```
 
 Set `ROUTEWAY_API_KEY` locally. The compatible-provider loop and strict model
-selection are covered by mock-provider tests. A live Routeway smoke test remains
-unvalidated because no API key was available. Record the actual provider and model
-for every role; benchmark runs must fail configuration checks if a requested model is unavailable, rather than
-falling back to another provider or a scripted solution.
+selection have mock-provider coverage. On 2026-09-09, the live connection check
+completed a required tool call with both `gpt-5.6-sol` and
+`glm-5.3-flash-uncensored`. Routeway returned null token counts for the GLM
+response; Vouch records `usageKnown: false`, charges the full reserved token
+bound, and leaves cost unavailable. Record the actual provider and model for
+every role; benchmark runs must fail configuration checks if a requested model
+is unavailable, rather than falling back to another provider or a scripted
+solution.
 
 ## Benchmark selection
 

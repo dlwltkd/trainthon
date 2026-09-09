@@ -12,8 +12,10 @@ describe("run CLI options", () => {
     });
   });
 
-  it("requires an explicit Blue model for live repository runs", () => {
-    expect(() => parseRunOptions(repository, {})).toThrow("explicit Blue model");
+  it("defaults live repository runs to the pinned Blue model", () => {
+    expect(parseRunOptions(repository, {})).toMatchObject({
+      model: { model: "gpt-5.6-sol", provider: "openai" },
+    });
     expect(parseRunOptions({ ...repository, model: "gpt-repair" }, {})).toMatchObject({
       model: { model: "gpt-repair", provider: "openai" },
     });
@@ -105,17 +107,13 @@ describe("run CLI options", () => {
     } });
   });
 
-  it.each([
-    ["flag provider", { "red-provider": "compatible" }, {}],
-    ["flag base URL", { "red-base-url": "https://provider.example/v1" }, {}],
-    ["flag key env", { "red-api-key-env": "RED_KEY" }, {}],
-    ["env provider", {}, { VOUCH_RED_PROVIDER: "compatible" }],
-    ["env base URL", {}, { VOUCH_RED_BASE_URL: "https://provider.example/v1" }],
-    ["env key env", {}, { VOUCH_RED_API_KEY_ENV: "RED_KEY" }],
-  ])("rejects orphaned Red %s configuration", (_label, redFlags, env) => {
-    expect(() => parseRunOptions({ ...repository, model: "gpt-repair", ...redFlags }, env)).toThrow(
-      "Red provider configuration requires --red-model or VOUCH_RED_MODEL",
-    );
+  it("defaults Red to the pinned Routeway model", () => {
+    expect(parseRunOptions(repository, {})).toMatchObject({
+      reviewModel: {
+        model: "glm-5.3-flash-uncensored",
+        provider: "compatible",
+      },
+    });
   });
 
   it("does not activate ambient live role configuration in scripted local mode", () => {
@@ -137,7 +135,7 @@ describe("run CLI options", () => {
     },
   );
 
-  it("defaults a configured Red model to the compatible provider", () => {
+  it("defaults an overridden Red model to the compatible provider", () => {
     expect(parseRunOptions({ ...repository, model: "gpt-repair", "red-model": "glm-review" }, {})).toMatchObject({
       reviewModel: { model: "glm-review", provider: "compatible" },
     });

@@ -56,22 +56,29 @@ pnpm cli run \
   --patch ./candidate.diff
 ```
 
-For a live repair, copy the environment template, choose an exact Blue coding
-model, and add the provider keys locally:
+For a live repair, copy the environment template and add the provider keys
+locally. Blue defaults to `gpt-5.6-sol` through OpenAI; Red defaults to
+`glm-5.3-flash-uncensored` through Routeway:
 
 ```bash
-cp .env.example .env
+install -m 600 .env.example .env
 # Edit .env, validate configuration, then make one tool-call probe per role.
 pnpm cli doctor
 pnpm cli doctor --live
 ```
+
+Daybreak Blue can replace the Blue default with
+`--model gpt-daybreak-blue-latest` after the OpenAI project receives separate
+Daybreak access. [OpenAI model page](https://developers.openai.com/api/docs/models/gpt-daybreak-blue-latest)
 
 `.env` is ignored by Git. Vouch accepts key-environment names rather than raw
 key flags, and it does not print key values in configuration or run logs. The
 Routeway Red role uses read-only tools to review evidence before Blue repairs
 the code. Its adapter sends `max_completion_tokens` and omits `seed`, which this
 exact GLM model does not advertise as supported. The adapter and connection
-check are implemented; a real provider smoke needs valid credentials.
+check are implemented. Routeway currently returns null token counts for this
+model, so Vouch marks usage unknown and charges the full reserved token bound
+instead of reporting invented usage or cost.
 
 The CLI loads the root `.env` without overriding exported variables. Run the
 repair with that provider configuration:
