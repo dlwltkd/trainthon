@@ -180,11 +180,11 @@ function readTools(
     defineTool(
       "grep",
       "Search for one literal substring, not a regular expression. To find alternatives, batch separate calls with exact substrings; operators such as | are not expanded. Optionally scope to a file/directory path. Returns at most 40 matching lines by default and 8 KB of snippets, with one hit per matching line. Pass nextOffset as offset to continue. Snippets include zero-based column and textTruncated; read_file can inspect the full line. Args: { pattern, path?, offset?, limit? }.",
-      z.object({ pattern: z.string().min(1).max(500).describe("One exact literal substring, not regex. For alternatives such as rate_limit, 429, or throttle, use separate calls rather than joining with |."), path: z.string().min(1).max(500).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() }),
+      z.object({ pattern: z.string().min(1).max(500).describe("One exact literal substring, not regex. For alternatives such as rate_limit, 429, or throttle, use separate calls rather than joining with |."), path: z.string().max(500).optional().describe("Repository-relative file or directory. Omit, use an empty string, or use . to search the repository root."), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() }),
       ({ pattern, path, offset, limit }) => queue.run(() => {
         signal.throwIfAborted();
         trace.requireReady();
-        const page = literalSearch(workspace, pattern, signal, path, offset, limit);
+        const page = literalSearch(workspace, pattern, signal, path || ".", offset, limit);
         trace.observe(page.hits.map(hit => hit.file));
         return page;
       }),

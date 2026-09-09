@@ -94,6 +94,18 @@ test("grep explains empty regex-looking queries while preserving actual literal 
   expect(await f.call("grep", { pattern: "missing_plain_text" })).not.toHaveProperty("warning");
 });
 
+test("grep treats an empty optional path as the repository root and retains exclusions and evidence checks", async () => {
+  const f = await fixture({ "app.py": "rate limit", "src/helper.py": "rate limit", ".env": "rate fixture-secret" });
+  symlinkSync(join(f.dir, ".env"), join(f.dir, "link.py"));
+  const page = await f.call<SearchPage>("grep", { pattern: "rate", path: "", limit: 1 });
+  expect(page).toEqual(await f.call("grep", { pattern: "rate", path: ".", limit: 1 }));
+  expect(page.hits).toEqual([expect.objectContaining({ file: "app.py" })]);
+  await f.call("report_progress", { ...plan, evidence: ["app.py"] });
+  await expect(f.call("report_progress", { ...plan, evidence: ["src/helper.py"] })).rejects.toThrow("observed repository file");
+  expect(await f.call("grep", { pattern: "rate", path: "", offset: page.nextOffset })).toMatchObject({ hits: [expect.objectContaining({ file: "src/helper.py" })], truncated: false });
+  expect((await f.call<SearchPage>("grep", { pattern: "fixture-secret", path: "" })).hits).toEqual([]);
+});
+
 test("directory pages bound long path inventories without dropping entries", async () => {
   const paths = Array.from({ length: 90 }, (_, index) => `${index.toString().padStart(3, "0")}_${"x".repeat(200)}.py`);
   const f = await fixture(Object.fromEntries(paths.map(path => [path, ""])));

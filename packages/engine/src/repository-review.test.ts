@@ -330,6 +330,7 @@ describe("prompt-driven source review", () => {
     expect(record.status).toBe("REVIEW_COMPLETE");
     expect(record.findings).toEqual([expect.objectContaining({ findingId: "wrong-claim", agentRole: "red", confidence: "potential" })]);
     expect(record.changes.files).toEqual([]);
+    expect(record.verification.protectedFilesUnchanged).toBe(true);
     expect(record).not.toHaveProperty("delivery");
     assertFinal(record, f);
   });
@@ -373,6 +374,7 @@ describe("prompt-driven source review", () => {
       runner: new ScriptedRunner(async () => { invoked = true; return "unexpected"; }),
     });
     expect(record.status).toBe("SETUP_ERROR");
+    expect(record.verification.protectedFilesUnchanged).toBe(false);
     expect(record.reason).toContain("nonempty model ID");
     expect(record.configHash).toBe("invalid-config");
     expect(invoked).toBe(false);

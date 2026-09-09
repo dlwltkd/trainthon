@@ -69,6 +69,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   let invoked = false;
   let patch = "";
   let files: string[] = [];
+  let protectedFilesUnchanged = false;
   let delivery: { patchHash: string; files: Array<{ path: string; sha256: string; deleted: boolean }> } | undefined;
   const transition = (to: EngineState) => { logger.emit({ type: "state_change", from: stage, to }); stage = to; };
   const emitAgentEvent = (event: EventInput) => {
@@ -156,6 +157,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     reason = status === "REVIEW_COMPLETE" ? "Source review completed; findings are source observations, not runtime security verification." : "The agent did not produce a final review with observed source evidence.";
     if (options.remediate) {
       const diff = await captureLocalChanges(workspace as LocalWorkspace);
+      protectedFilesUnchanged = true;
       patch = diff.patch; files = diff.changedFiles;
       writeFileSync(artifacts.patch, patch, { mode: 0o600 });
       logger.emit({ type: "diff_snapshot", patch });
@@ -192,7 +194,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     startedAt, endedAt, elapsedMs: endedAt - startedAt, costUsd: invoked ? null : 0,
     seed: options.seed, budgets: options.budgets, requestPolicy: REQUEST_POLICY, usage: budget?.usage ?? { inputTokens: 0, outputTokens: 0, steps: 0 }, usageKnown: budget?.usageKnown ?? true,
     repository: { name: source?.name ?? basename(options.repoPath), url: source?.url, requestedRef: options.ref ?? "HEAD", commit: workspace?.commit ?? null, files: workspace?.files.length ?? 0 },
-    model: options.model, ...(options.reviewModel ? { reviewModel: options.reviewModel, reviewSummary, ...(reviewStatus ? { reviewStatus } : {}), ...(reviewFailure ? { reviewFailure } : {}) } : {}), verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged: status === "PATCH_PROPOSED" },
+    model: options.model, ...(options.reviewModel ? { reviewModel: options.reviewModel, reviewSummary, ...(reviewStatus ? { reviewStatus } : {}), ...(reviewFailure ? { reviewFailure } : {}) } : {}), verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged },
     findings: [...recordedFindings.values()], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },
     ...(delivery ? { delivery } : {}), artifacts,
   };
