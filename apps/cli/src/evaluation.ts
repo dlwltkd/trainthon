@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { executeRepositoryReview } from "@vouch/engine";
 import { summarizeSourceEvaluation, type EvaluationCase, type EvaluationTrial, type SourceEvaluation } from "@vouch/protocol";
 import { COHORT_URL, evaluationCases, prepareEvaluationSources, sha256 } from "./evaluation-cohort.js";
@@ -9,49 +9,60 @@ import { runCodexSource } from "./evaluation-codex.js";
 import { applyAnswerEdits, gradeSourceAnswer, parseSourceAnswer } from "./evaluation-grade.js";
 import { createRunProgress } from "./progress.js";
 import { DEVELOPMENT_COHORT_SHA256, DEVELOPMENT_COHORT_URL, developmentCases, prepareDevelopmentSources } from "./evaluation-development.js";
+import { CVEBENCH_COHORT_SHA256, CVEBENCH_COHORT_URL, CVEBENCH_DATASET_URL, cvebenchCases } from "./evaluation-cvebench.js";
 
 function writeJson(path: string, value: unknown) {
   writeFileSync(`${path}.tmp`, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
   renameSync(`${path}.tmp`, path);
 }
 
+export function hasUncommittedEvaluationCode(status: string): boolean {
+  return status.split("\0").filter(Boolean).some(entry => !/^\?\? output\/presentations\/[^\0]+\.png$/i.test(entry));
+}
+
 export async function runSourceEvaluation(flags: Record<string, string | boolean>, repoRoot: string): Promise<void> {
   for (const key of Object.keys(flags)) if (!["suite", "prepare"].includes(key)) throw new Error(`unknown evaluation flag: --${key}`);
-  if (!["cvefixes", "development20"].includes(String(flags.suite))) throw new Error("use --suite cvefixes or --suite development20");
+  if (!["cvefixes", "development20", "cvebench20"].includes(String(flags.suite))) throw new Error("use --suite cvefixes, --suite development20, or --suite cvebench20");
   const development = flags.suite === "development20";
+  const cvebench = flags.suite === "cvebench20";
   if (flags.prepare !== undefined && flags.prepare !== true) throw new Error("--prepare is a boolean flag");
   const runsDir = join(repoRoot, "runs"), cacheDir = join(runsDir, "evaluation-cache");
   const controller = new AbortController();
   const interrupt = () => controller.abort();
   process.once("SIGINT", interrupt); process.once("SIGTERM", interrupt);
   try {
-    process.stdout.write(development ? "Preparing twenty distinct fixed source development tasks.\n" : "Preparing four hash-pinned source snapshots from the CVEfixes example cohort.\n");
+    const cases = development ? developmentCases(repoRoot) : cvebench ? cvebenchCases(repoRoot) : evaluationCases();
+    process.stdout.write(cvebench ? "Preparing all twenty pinned CVE-Bench source repair tasks.\n" : development ? "Preparing twenty distinct fixed source development tasks.\n" : "Preparing four hash-pinned source snapshots from the CVEfixes example cohort.\n");
     if (development) prepareDevelopmentSources(repoRoot, cacheDir);
-    else await prepareEvaluationSources(cacheDir, controller.signal);
-    const cases = development ? developmentCases(repoRoot) : evaluationCases();
+    else await prepareEvaluationSources(cacheDir, controller.signal, cases);
     if (flags.prepare) { process.stdout.write(`Prepared ${cases.length} cases in ${cacheDir}\n`); return; }
     if (!process.env.OPENAI_API_KEY?.trim()) throw new Error("OPENAI_API_KEY is required for the paired live evaluation");
     const codexVersion = execFileSync("codex", ["--version"], { encoding: "utf8", timeout: 10_000 }).trim();
     execFileSync("python3", ["-I", "-c", "import ast"], { timeout: 10_000 });
     const codeCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8", timeout: 10_000 }).trim();
-    if (execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"], { cwd: repoRoot, encoding: "utf8", timeout: 10_000 }).trim()) {
+    if (hasUncommittedEvaluationCode(execFileSync("git", ["status", "--porcelain", "-z", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8", timeout: 10_000 }))) {
       throw new Error("commit the evaluation implementation before a measured run so code provenance is reproducible");
     }
-    const id = `${development ? "dev20" : "cvefixes"}-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const id = `${cvebench ? "cvebench20" : development ? "dev20" : "cvefixes"}-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const dir = join(runsDir, "evaluations", id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const manifest: SourceEvaluation["manifest"] = {
-      suite: development ? "defensive-development20-v1" : "cvefixes-source-pilot-v3",
-      datasetUrl: development ? DEVELOPMENT_COHORT_URL : "https://github.com/secureIT-project/CVEfixes", cohortUrl: development ? DEVELOPMENT_COHORT_URL : COHORT_URL,
-      ...(development ? { cohortSha256: DEVELOPMENT_COHORT_SHA256 } : {}), maxConcurrentPairs: development ? 2 : 1,
-      selection: development ? "Twenty distinct, synthetic Python source tasks covering application security contracts, including unchanged controls. All tasks, prompts, source snapshots and reference corrections are frozen before the first run. This is an explicitly tuned development set, separate from CVEfixes." : "Two Python source-fix cases from the official example cohort, selected before any evaluation: CWE-93 and CWE-755. Each fixing commit and its first parent provide a paired before/fixed control. This is a convenience sample from one project, not the full CVEfixes release.",
+      suite: cvebench ? "cvebench-source20-v1" : development ? "defensive-development20-v1" : "cvefixes-source-pilot-v3",
+      datasetUrl: cvebench ? CVEBENCH_DATASET_URL : development ? DEVELOPMENT_COHORT_URL : "https://github.com/secureIT-project/CVEfixes", cohortUrl: cvebench ? CVEBENCH_COHORT_URL : development ? DEVELOPMENT_COHORT_URL : COHORT_URL,
+      ...(cvebench ? { cohortSha256: CVEBENCH_COHORT_SHA256 } : development ? { cohortSha256: DEVELOPMENT_COHORT_SHA256 } : {}), maxConcurrentPairs: development || cvebench ? 2 : 1,
+      selection: cvebench ? "All twenty published locate tasks from GiovanniGatti/cve-bench at commit 45cb1bf72f034eace43e46a9ae131c53a7fd292b, each adapted to its complete named Python module. Sources and corrections are pinned to the registered upstream fixing commit and vulnerable parent. No selection based on our model outcomes." : development ? "Twenty distinct, synthetic Python source tasks covering application security contracts, including unchanged controls. All tasks, prompts, source snapshots and reference corrections are frozen before the first run. This is an explicitly tuned development set, separate from CVEfixes." : "Two Python source-fix cases from the official example cohort, selected before any evaluation: CWE-93 and CWE-755. Each fixing commit and its first parent provide a paired before/fixed control. This is a convenience sample from one project, not the full CVEfixes release.",
       model: "gpt-5.6-sol", codeCommit, codexVersion, maxWallMs: 8 * 60_000, cumulativeTokenLimit: null, vouchMaxSteps: null, seed: 1,
       grader: "python-ast-reference-v1", runtimeTests: false,
       conditions: {
         codex: "Native Codex CLI, source-only configuration: full file in the prompt, JSON replacements, tools/web/host skills disabled, read-only process workspace, provider defaults for reasoning. This is not unrestricted default Codex.",
-        vouch: "Production Red review then Blue validation/repair, separate source workspaces, bounded file tools and skills, same model for both roles. Each role receives complete named files up to 192 KB in its initial context. Progress is reported at decisions and context compaction, without a fixed six-step cadence. Provider defaults for reasoning. No source execution or tool network access.",
+        vouch: "Production Red review then Blue validation/repair, separate source workspaces, bounded file tools and skills, same model for both roles. Each role receives complete named files up to 256 KB in its initial context. Skill selection can publish a public plan in the same call. Progress is reported at decisions and context compaction, without a fixed cadence. Provider defaults for reasoning. No source execution or tool network access.",
       },
-      limitations: [...(development ? [
+      limitations: [...(cvebench ? [
+        "Source-only adaptation of CVE-Bench, not a replication of its runtime evaluation or leaderboard. Only the complete named module is provided, not the whole repository; some upstream corrections also change other modules. No original security tests, setup scripts, or application code are executed.",
+        "All twenty tasks are disclosed repair problems. Label agreement alone is not a useful detection score here; the primary displayed metric is named-module AST reference agreement. There are no fixed controls in this repair cohort.",
+        "Public historical patches may be in model training data. Repeated runs used to improve skills are development-set tuning, not held-out evidence. Every task, source, prompt, reference and grading rule stays fixed between repetitions.",
+        "Both conditions receive the complete named module and the same locate scope. Two pairs run concurrently with an equal eight-minute wall allowance. The role structure and number of model requests differ, so equal model and wall time do not mean equal compute.",
+      ] : development ? [
         "Synthetic development tasks authored for iterative harness and skill tuning. Repeated results on these same problems are development-set results, not held-out performance or an external CVEfixes benchmark.",
         "Twenty distinct source contracts, not twenty repetitions of a smaller sample. Correct controls measure unnecessary edits. The model receives the contract and original source; labels and reference corrections stay outside the agent workspaces and prompts.",
         "The complete registered set runs every time. Two case pairs run concurrently; both conditions use the same model and eight-minute per-trial allowance, with no cumulative token or step ceiling. More roles and tool calls can consume more compute.",
@@ -93,6 +104,7 @@ export async function runSourceEvaluation(flags: Record<string, string | boolean
         } else {
           const repo = join(trialDir, "input");
           mkdirSync(repo);
+          mkdirSync(dirname(join(repo, sourcePath)), { recursive: true });
           writeFileSync(join(repo, sourcePath), original, { mode: 0o600 });
           const git = (args: string[]) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Vouch Evaluation", "-c", "user.email=evaluation@localhost", ...args], { cwd: repo, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
           git(["init", "--quiet"]); git(["add", sourcePath]); git(["commit", "--quiet", "-m", "source snapshot"]);

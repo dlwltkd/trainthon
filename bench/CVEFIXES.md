@@ -17,6 +17,8 @@ The first completed v1 experiment recorded 3/4 label agreement for Codex and 2/4
 
 V2 completed all eight trials with 3/4 label agreement for each condition. V3 addresses the measured interaction overhead by supplying complete named files and removing periodic progress-only model requests. It retains the cohort, task prompts, model, wall-time allowance, and conservative grader. V3 is also a development-set re-evaluation; all earlier results remain visible.
 
+The completed v3 run at `dc519af` retained 3/4 label agreement for both conditions. Vouch's summed trial time fell from 568.198 seconds in v2 to 312.064 seconds in v3 (45.1% less time). This measures elapsed source-review time on the same four development cases, not a gain in security accuracy.
+
 The deterministic grader records:
 
 - **Label agreement:** the final source verdict agrees with the before/fixed label and includes a verbatim citation from the original source. The correctness of the explanation still needs human review.

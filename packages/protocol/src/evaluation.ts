@@ -43,7 +43,7 @@ export interface SourceEvaluation {
   endedAt?: number;
   manifestHash: string;
   manifest: {
-    suite: "cvefixes-source-pilot-v1" | "cvefixes-source-pilot-v2" | "cvefixes-source-pilot-v3" | "defensive-development20-v1";
+    suite: "cvefixes-source-pilot-v1" | "cvefixes-source-pilot-v2" | "cvefixes-source-pilot-v3" | "defensive-development20-v1" | "cvebench-source20-v1";
     cohortSha256?: string;
     maxConcurrentPairs?: number;
     datasetUrl: string;
@@ -67,6 +67,7 @@ export interface SourceEvaluation {
 
 export function summarizeSourceEvaluation(evaluation: SourceEvaluation) {
   const cases = evaluation.manifest.cases;
+  const vulnerableCases = cases.filter(task => task.variant === "before").length;
   const arms = (["codex", "vouch"] as const).map(arm => {
     let completed = 0, errors = 0, correct = 0, referenceMatches = 0, controlsUnchanged = 0;
     for (const task of cases) {
@@ -82,6 +83,7 @@ export function summarizeSourceEvaluation(evaluation: SourceEvaluation) {
     }
     return { arm, total: cases.length, completed, errors, correct, referenceMatches, controlsUnchanged,
       accuracy: cases.length ? correct / cases.length : null,
+      referenceAccuracy: vulnerableCases ? referenceMatches / vulnerableCases : null,
       elapsedMs: evaluation.trials.filter(trial => trial.arm === arm).reduce((sum, trial) => sum + (trial.elapsedMs ?? 0), 0) };
   });
   const baseline = arms[0]!, harness = arms[1]!;
@@ -89,8 +91,10 @@ export function summarizeSourceEvaluation(evaluation: SourceEvaluation) {
     && evaluation.status === "completed" && evaluation.trials.length === cases.length * 2
     && arms.every(arm => arm.completed + arm.errors === cases.length);
   const differencePp = complete ? ((harness.accuracy ?? 0) - (baseline.accuracy ?? 0)) * 100 : null;
-  return { arms, complete, differencePp,
+  const referenceDifferencePp = complete && vulnerableCases ? ((harness.referenceAccuracy ?? 0) - (baseline.referenceAccuracy ?? 0)) * 100 : null;
+  return { arms, complete, differencePp, referenceDifferencePp,
+    relativeReferenceChangePercent: referenceDifferencePp !== null && baseline.referenceAccuracy ? referenceDifferencePp / baseline.referenceAccuracy : null,
     relativeChangePercent: differencePp !== null && baseline.accuracy ? differencePp / baseline.accuracy : null,
-    vulnerableCases: cases.filter(task => task.variant === "before").length,
+    vulnerableCases,
     controlCases: cases.filter(task => task.variant === "fixed").length };
 }

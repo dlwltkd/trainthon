@@ -24,9 +24,11 @@ describe("Codex source-only adapter", () => {
       child.emit("close", 0);
     });
     try {
-      const result = await runCodexSource({ dir, prompt: "arithmetic", source: "answer=42", model: "gpt-5.6-sol", maxWallMs: 10_000, signal: new AbortController().signal });
+      const result = await runCodexSource({ dir, prompt: "arithmetic", source: "answer=42", sourcePath: "src/example.py", model: "gpt-5.6-sol", maxWallMs: 10_000, signal: new AbortController().signal });
       expect(result).toEqual({ text: "42", usage: { inputTokens: 12, outputTokens: 3 } });
       expect(readFileSync(join(dir, "events.jsonl"), "utf8")).not.toContain("private reasoning");
+      expect(readFileSync(join(dir, "prompt.txt"), "utf8")).toContain('<source path="src/example.py">');
+      expect(JSON.parse(readFileSync(join(dir, "answer-schema.json"), "utf8")).properties.evidence.items.properties.path.enum).toEqual(["src/example.py"]);
       const [, args, options] = processMock.spawn.mock.calls.at(-1)!;
       expect(args).toContain('web_search="disabled"');
       expect(args).toContain("shell_tool");

@@ -26,31 +26,34 @@ export function SourceEvaluations() {
 
 export function SourceEvaluationCard({ evaluation }: { evaluation: SourceEvaluation }) {
   const development = evaluation.manifest.suite === "defensive-development20-v1";
+  const cvebench = evaluation.manifest.suite === "cvebench-source20-v1";
   const summary = summarizeSourceEvaluation(evaluation);
+  const difference = cvebench ? summary.referenceDifferencePp : summary.differencePp;
+  const relativeChange = cvebench ? summary.relativeReferenceChangePercent : summary.relativeChangePercent;
   const settled = evaluation.trials.filter(trial => !["pending", "running"].includes(trial.status)).length;
   const total = evaluation.manifest.cases.length * 2;
   return (
     <Panel className="overflow-hidden">
       <div className="border-b border-line p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2"><Chip tone="info">{development ? "Development 20 · fixed tuning set" : "CVEfixes · source pilot"}</Chip><Chip tone={evaluation.status === "running" ? "running" : evaluation.status === "cancelled" ? "warn" : "neutral"} dot>{evaluation.status}</Chip></div>
+          <div className="flex items-center gap-2"><Chip tone="info">{cvebench ? "CVE-Bench · 20 source repair tasks" : development ? "Development 20 · fixed tuning set" : "CVEfixes · source pilot"}</Chip><Chip tone={evaluation.status === "running" ? "running" : evaluation.status === "cancelled" ? "warn" : "neutral"} dot>{evaluation.status}</Chip></div>
           <Mono className="text-ink-3">{evaluation.manifest.model} · both conditions</Mono>
         </div>
         <h2 className="mt-4 text-2xl font-semibold tracking-tight">One model. {evaluation.manifest.cases.length} fixed source tasks. Every result recorded.</h2>
-        <p className="mt-2 max-w-3xl text-ink-2">{development ? "Twenty distinct synthetic security contracts, including correct controls. Repeated runs measure development-set tuning; the inputs and grading stay fixed." : "Two historical CVEs, each paired with its published correction. Source verdicts and patch reference agreement are measured separately."}</p>
+        <p className="mt-2 max-w-3xl text-ink-2">{cvebench ? "All twenty published repair tasks, adapted to their complete named source modules. The score compares candidate ASTs with published corrections; it is separate from the original benchmark's runtime results." : development ? "Twenty distinct synthetic security contracts, including correct controls. Repeated runs measure development-set tuning; the inputs and grading stay fixed." : "Two historical CVEs, each paired with its published correction. Source verdicts and patch reference agreement are measured separately."}</p>
         <div className="mt-5 flex items-center gap-3 text-[0.85em] text-ink-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100"><div className="h-full bg-ink transition-[width]" style={{ width: `${settled / total * 100}%` }} /></div><span>{settled}/{total} trials finished</span></div>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
           {summary.arms.map(arm => <div key={arm.arm} className={`rounded-xl border p-4 ${arm.arm === "vouch" ? "border-blue-role/25 bg-blue-role/5" : "border-line bg-canvas/50"}`}>
             <div className="text-[0.85em] font-medium text-ink-2">{arm.arm === "vouch" ? "Vouch · Red → Blue" : "Codex CLI · source-only"}</div>
-            <div className="mt-2 flex items-end gap-2"><span className="text-4xl font-semibold tabular-nums tracking-tight">{percent(arm.completed + arm.errors ? arm.accuracy : null)}</span><span className="pb-1 text-ink-3">{arm.correct}/{arm.total}</span></div>
-            <div className="mt-1 text-[0.85em] text-ink-3">Label agreement{!summary.complete && " · provisional"}</div>
-            <div className="mt-4 border-t border-line pt-3 text-[0.85em] text-ink-2"><div>Reference agreement <strong>{arm.referenceMatches}/{summary.vulnerableCases}</strong></div><div className="mt-1">Fixed controls preserved <strong>{arm.controlsUnchanged}/{summary.controlCases}</strong></div><div className="mt-1">{arm.errors} failed or cancelled · {formatDuration(arm.elapsedMs)} total</div></div>
+            <div className="mt-2 flex items-end gap-2"><span className="text-4xl font-semibold tabular-nums tracking-tight">{percent(arm.completed + arm.errors ? cvebench ? arm.referenceAccuracy : arm.accuracy : null)}</span><span className="pb-1 text-ink-3">{cvebench ? arm.referenceMatches : arm.correct}/{arm.total}</span></div>
+            <div className="mt-1 text-[0.85em] text-ink-3">{cvebench ? "Module AST reference agreement" : "Label agreement"}{!summary.complete && " · provisional"}</div>
+            <div className="mt-4 border-t border-line pt-3 text-[0.85em] text-ink-2"><div>{cvebench ? <>Label agreement <strong>{arm.correct}/{arm.total}</strong></> : <>Reference agreement <strong>{arm.referenceMatches}/{summary.vulnerableCases}</strong></>}</div>{summary.controlCases > 0 && <div className="mt-1">Fixed controls preserved <strong>{arm.controlsUnchanged}/{summary.controlCases}</strong></div>}<div className="mt-1">{arm.errors} failed or cancelled · {formatDuration(arm.elapsedMs)} total</div></div>
           </div>)}
           <div className="rounded-xl bg-ink p-4 text-white">
-            <div className="text-[0.85em] text-white/65">Label agreement difference</div>
-            <div className="mt-2 text-4xl font-semibold tabular-nums tracking-tight">{summary.differencePp === null ? evaluation.status === "cancelled" ? "Cancelled" : "Pending" : `${signed(summary.differencePp)} pp`}</div>
-            <p className="mt-3 text-[0.85em] leading-relaxed text-white/70">{summary.differencePp === null ? evaluation.status === "cancelled" ? "This experiment was interrupted. No paired comparison is published." : "A comparison appears after both conditions finish the complete registered set." : summary.relativeChangePercent === null ? "Relative change is undefined because baseline accuracy is zero." : `${signed(summary.relativeChangePercent)}% relative change from the baseline.`}</p>
-            <p className="mt-3 text-[0.85em] text-white/70">{development ? "Development-set tuning. This is not held-out performance." : "Small, correlated pilot. No general performance advantage established."}</p>
+            <div className="text-[0.85em] text-white/65">{cvebench ? "Reference agreement difference" : "Label agreement difference"}</div>
+            <div className="mt-2 text-4xl font-semibold tabular-nums tracking-tight">{difference === null ? evaluation.status === "cancelled" ? "Cancelled" : "Pending" : `${signed(difference)} pp`}</div>
+            <p className="mt-3 text-[0.85em] leading-relaxed text-white/70">{difference === null ? evaluation.status === "cancelled" ? "This experiment was interrupted. No paired comparison is published." : "A comparison appears after both conditions finish the complete registered set." : relativeChange === null ? "Relative change is undefined because the baseline score is zero." : `${signed(relativeChange)}% relative change from the baseline.`}</p>
+            <p className="mt-3 text-[0.85em] text-white/70">{cvebench ? "AST differences can include valid alternative fixes. This score does not establish runtime correctness." : development ? "Development-set tuning. This is not held-out performance." : "Small, correlated pilot. No general performance advantage established."}</p>
           </div>
         </div>
       </div>
@@ -59,7 +62,7 @@ export function SourceEvaluationCard({ evaluation }: { evaluation: SourceEvaluat
           <thead className="border-b border-line bg-canvas/50 text-[0.8em] uppercase tracking-wide text-ink-3"><tr><th className="px-5 py-3">Pinned case</th><th className="px-5 py-3">Codex CLI · source-only</th><th className="px-5 py-3">Vouch · Red → Blue</th></tr></thead>
           <tbody className="divide-y divide-line">{evaluation.manifest.cases.map(task => <tr key={task.id}>
             <td className="px-5 py-4 align-top"><a className="font-medium hover:underline" href={development ? `/api/evaluations/${encodeURIComponent(evaluation.id)}/artifact?case=${encodeURIComponent(task.id)}&arm=codex&name=source.py` : task.sourceUrl} target="_blank" rel="noreferrer">{task.title ?? task.cve ?? task.id}</a><div className="mt-1 text-[0.85em] text-ink-3">{task.cwe} · {task.variant === "before" ? "before correction" : "fixed control"}</div><Mono className="mt-2 block text-[0.75em] text-ink-3" title={task.sourceSha256}>{task.sourceSha256.slice(0, 12)}</Mono></td>
-            {(["codex", "vouch"] as const).map(arm => <td key={arm} className="max-w-sm px-5 py-4 align-top"><TrialResult task={task} trial={evaluation.trials.find(trial => trial.caseId === task.id && trial.arm === arm)} evaluationId={evaluation.id} /></td>)}
+            {(["codex", "vouch"] as const).map(arm => <td key={arm} className="max-w-sm px-5 py-4 align-top"><TrialResult task={task} trial={evaluation.trials.find(trial => trial.caseId === task.id && trial.arm === arm)} evaluationId={evaluation.id} referenceMetric={cvebench} /></td>)}
           </tr>)}</tbody>
         </table>
       </div>
@@ -71,20 +74,21 @@ export function SourceEvaluationCard({ evaluation }: { evaluation: SourceEvaluat
           <p>Equal wall-time allowance: {formatDuration(evaluation.manifest.maxWallMs)} per case and condition. No cumulative token limit. {evaluation.manifest.codexVersion} · code {evaluation.manifest.codeCommit.slice(0, 12)}.</p>
           {evaluation.manifest.limitations.map(note => <p key={note}>{note}</p>)}
           <p className="break-all">Manifest SHA-256: <Mono>{evaluation.manifestHash}</Mono></p>
-          {development ? <p className="break-all">Fixed cohort SHA-256: <Mono>{evaluation.manifest.cohortSha256}</Mono></p> : <a href="https://github.com/secureIT-project/CVEfixes" target="_blank" rel="noreferrer" className="underline">CVEfixes dataset and publication</a>}
+          {(development || cvebench) && <p className="break-all">Fixed cohort SHA-256: <Mono>{evaluation.manifest.cohortSha256}</Mono></p>}{!development && <a href={cvebench ? "https://github.com/GiovanniGatti/cve-bench" : "https://github.com/secureIT-project/CVEfixes"} target="_blank" rel="noreferrer" className="underline">{cvebench ? "Original CVE-Bench dataset and method" : "CVEfixes dataset and publication"}</a>}
         </div></details>
       </div>
     </Panel>
   );
 }
 
-function TrialResult({ task, trial, evaluationId }: { task: EvaluationCase; trial?: EvaluationTrial; evaluationId: string }) {
+function TrialResult({ task, trial, evaluationId, referenceMetric = false }: { task: EvaluationCase; trial?: EvaluationTrial; evaluationId: string; referenceMetric?: boolean }) {
   if (!trial || trial.status === "pending") return <span className="text-ink-3">Queued</span>;
   if (trial.status === "running") return <div className="flex flex-col items-start gap-2"><Chip tone="running" dot>Running</Chip>{trial.startedAt && <span className="text-[0.8em] text-ink-3">{formatDuration(Math.max(0, Date.now() - trial.startedAt))} elapsed</span>}{trial.runId && <a href={routeHref({ name: "run", runId: trial.runId })} className="text-[0.85em] underline">Watch agent activity</a>}</div>;
   const correct = trial.status === "completed" && trial.evidenceValid === true && trial.verdict === (task.variant === "before" ? "issue_present" : "issue_absent");
+  const referenceCorrect = correct && trial.referenceMatch === true && trial.syntaxValid === true;
   const artifact = (name: string) => `/api/evaluations/${encodeURIComponent(evaluationId)}/artifact?case=${encodeURIComponent(task.id)}&arm=${trial.arm}&name=${name}`;
   return <div className="space-y-2">
-    <Chip tone={trial.status !== "completed" ? "warn" : correct ? "pass" : "fail"}>{trial.status === "completed" ? correct ? "Label agrees" : "No label credit" : trial.status}</Chip>
+    <Chip tone={trial.status !== "completed" ? "warn" : referenceMetric ? referenceCorrect ? "pass" : "warn" : correct ? "pass" : "fail"}>{trial.status === "completed" ? referenceMetric ? referenceCorrect ? "Reference agrees" : "No reference agreement" : correct ? "Label agrees" : "No label credit" : trial.status}</Chip>
     {trial.status === "completed" && <div className="text-[0.85em] text-ink-2">{task.variant === "before" ? `Reference ${trial.referenceMatch ? "matches" : "differs"}` : `Control ${trial.unchanged ? "unchanged" : "modified"}`} · {trial.syntaxValid ? "syntax valid" : "syntax invalid"}</div>}
     <div className="text-[0.8em] text-ink-3">{formatDuration(trial.elapsedMs)}{trial.usage ? ` · ${(trial.usage.inputTokens + trial.usage.outputTokens).toLocaleString()} tokens` : " · token usage unavailable"}</div>
     {(trial.summary || trial.error) && <details className="text-[0.85em]"><summary className="cursor-pointer text-ink-2">{trial.error ? "Failure detail" : "Decision and evidence"}</summary><p className="mt-2 max-w-md whitespace-pre-wrap break-words text-ink-3">{trial.error ?? trial.summary}</p></details>}

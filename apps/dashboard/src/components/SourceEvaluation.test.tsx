@@ -13,6 +13,18 @@ function fixture(): SourceEvaluation {
 }
 
 describe("measured source evaluation display", () => {
+  it("uses reference agreement for the repair-only cohort instead of rewarding all-positive labels", () => {
+    const run = fixture(); run.manifest.suite = "cvebench-source20-v1";
+    run.trials[0]!.referenceMatch = false;
+    const html = renderToStaticMarkup(<SourceEvaluationCard evaluation={run} />);
+    expect(html).toContain("CVE-Bench · 20 source repair tasks");
+    expect(html).toContain("Module AST reference agreement");
+    expect(html).toContain("+50.0 pp");
+    expect(html).toContain("No reference agreement");
+    expect(html).toContain("separate from the original benchmark");
+    expect(html).not.toContain("CVEfixes dataset and publication");
+  });
+
   it("labels development tuning separately from the external CVEfixes pilot", () => {
     const run = fixture(); run.manifest.suite = "defensive-development20-v1";
     run.manifest.cases[0]!.title = "Tenant boundary";

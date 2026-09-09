@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { SourceEvaluation } from "@vouch/protocol";
 import { readBoundedText, resolveInside } from "./registry.js";
 
-export const EVALUATION_ID = /^(?:cvefixes|dev20)-\d+-[a-f0-9]{8}$/;
+export const EVALUATION_ID = /^(?:cvefixes|dev20|cvebench20)-\d+-[a-f0-9]{8}$/;
 const hashPattern = /^[a-f0-9]{64}$/;
 
 export function readSourceEvaluation(runsDir: string, id: string): SourceEvaluation | null {
@@ -17,9 +17,10 @@ export function readSourceEvaluation(runsDir: string, id: string): SourceEvaluat
       || !Number.isFinite(value.createdAt) || !hashPattern.test(value.manifestHash)) return null;
     const manifest = value.manifest;
     const development = manifest?.suite === "defensive-development20-v1";
-    const count = development ? 20 : 4;
-    if (development !== id.startsWith("dev20-") || development && !hashPattern.test(manifest.cohortSha256 ?? "")) return null;
-    if (!["cvefixes-source-pilot-v1", "cvefixes-source-pilot-v2", "cvefixes-source-pilot-v3", "defensive-development20-v1"].includes(manifest?.suite) || manifest.grader !== "python-ast-reference-v1" || manifest.runtimeTests !== false
+    const cvebench = manifest?.suite === "cvebench-source20-v1";
+    const count = development || cvebench ? 20 : 4;
+    if (development !== id.startsWith("dev20-") || cvebench !== id.startsWith("cvebench20-") || (development || cvebench) && !hashPattern.test(manifest.cohortSha256 ?? "")) return null;
+    if (!["cvefixes-source-pilot-v1", "cvefixes-source-pilot-v2", "cvefixes-source-pilot-v3", "defensive-development20-v1", "cvebench-source20-v1"].includes(manifest?.suite) || manifest.grader !== "python-ast-reference-v1" || manifest.runtimeTests !== false
       || typeof manifest.model !== "string" || typeof manifest.codeCommit !== "string" || typeof manifest.codexVersion !== "string"
       || typeof manifest.conditions?.codex !== "string" || typeof manifest.conditions.vouch !== "string"
       || !Array.isArray(manifest.limitations) || manifest.limitations.some(item => typeof item !== "string")
@@ -27,13 +28,18 @@ export function readSourceEvaluation(runsDir: string, id: string): SourceEvaluat
     if (createHash("sha256").update(JSON.stringify(manifest)).digest("hex") !== value.manifestHash) return null;
     const ids = new Set<string>();
     for (const task of manifest.cases) {
-      if (!(development ? /^case-(?:0[1-9]|1[0-9]|20)$/ : /^sample-[1-4]$/).test(task.id) || ids.has(task.id) || !["before", "fixed"].includes(task.variant)
+      if (!(count === 20 ? /^case-(?:0[1-9]|1[0-9]|20)$/ : /^sample-[1-4]$/).test(task.id) || ids.has(task.id) || !["before", "fixed"].includes(task.variant)
         || !/^CWE-\d+$/.test(task.cwe) || typeof task.prompt !== "string"
         || !hashPattern.test(task.sourceSha256) || !hashPattern.test(task.referenceSha256)) return null;
       if (development) {
         if (typeof task.title !== "string" || !task.title.trim() || task.cve !== undefined || task.sourcePath !== "policy.py"
           || task.sourceUrl !== `fixture://defensive-development20-v1/${task.id}/policy.py`
           || task.referenceUrl !== `fixture://defensive-development20-v1/${task.id}/reference.py`) return null;
+      } else if (cvebench) {
+        if (task.variant !== "before" || typeof task.title !== "string" || !task.title.trim()
+          || task.cve !== undefined && !/^CVE-\d{4}-\d+$/.test(task.cve)
+          || typeof task.sourcePath !== "string" || !/^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.py$/.test(task.sourcePath)
+          || [task.sourceUrl, task.referenceUrl].some(url => !/^https:\/\/raw\.githubusercontent\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[a-f0-9]{40}\//.test(url) || !url.endsWith(`/${task.sourcePath}`) || url.split("/").includes(".."))) return null;
       } else if (!/^CVE-\d{4}-\d+$/.test(task.cve ?? "") || task.sourcePath !== undefined && task.sourcePath !== "bottle.py"
         || !/^https:\/\/raw\.githubusercontent\.com\/bottlepy\/bottle\/[a-f0-9]{40}\/bottle\.py$/.test(task.sourceUrl)
         || !/^https:\/\/raw\.githubusercontent\.com\/bottlepy\/bottle\/[a-f0-9]{40}\/bottle\.py$/.test(task.referenceUrl)) return null;

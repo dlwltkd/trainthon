@@ -6,19 +6,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SourceEvaluation } from "@vouch/protocol";
 import { evaluationCases } from "../../cli/src/evaluation-cohort.js";
 import { DEVELOPMENT_COHORT_SHA256, developmentCases } from "../../cli/src/evaluation-development.js";
+import { CVEBENCH_COHORT_SHA256, cvebenchCases } from "../../cli/src/evaluation-cvebench.js";
 import { createApp } from "./index.js";
 import { listSourceEvaluations, readEvaluationArtifact, readSourceEvaluation } from "./evaluations.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function fixture(development = false) {
+function fixture(development = false, cvebench = false) {
   const root = mkdtempSync(join(tmpdir(), "vouch-evaluation-api-")); roots.push(root);
-  const id = `${development ? "dev20" : "cvefixes"}-100-1234abcd`, dir = join(root, "evaluations", id);
+  const id = `${cvebench ? "cvebench20" : development ? "dev20" : "cvefixes"}-100-1234abcd`, dir = join(root, "evaluations", id);
   mkdirSync(dir, { recursive: true });
-  const manifest = { suite: development ? "defensive-development20-v1" : "cvefixes-source-pilot-v1", grader: "python-ast-reference-v1", runtimeTests: false,
-    ...(development ? { cohortSha256: DEVELOPMENT_COHORT_SHA256 } : {}),
-    model: "test-only", codeCommit: "a".repeat(40), codexVersion: "test", conditions: { codex: "test", vouch: "test" }, limitations: [], cases: development ? developmentCases(resolve(import.meta.dirname, "../../..")) : evaluationCases() } as unknown as SourceEvaluation["manifest"];
+  const manifest = { suite: cvebench ? "cvebench-source20-v1" : development ? "defensive-development20-v1" : "cvefixes-source-pilot-v1", grader: "python-ast-reference-v1", runtimeTests: false,
+    ...(cvebench ? { cohortSha256: CVEBENCH_COHORT_SHA256 } : development ? { cohortSha256: DEVELOPMENT_COHORT_SHA256 } : {}),
+    model: "test-only", codeCommit: "a".repeat(40), codexVersion: "test", conditions: { codex: "test", vouch: "test" }, limitations: [], cases: cvebench ? cvebenchCases(resolve(import.meta.dirname, "../../..")) : development ? developmentCases(resolve(import.meta.dirname, "../../..")) : evaluationCases() } as unknown as SourceEvaluation["manifest"];
   const record: SourceEvaluation = { schemaVersion: 1, id, status: "running", createdAt: 100, manifest,
     manifestHash: createHash("sha256").update(JSON.stringify(manifest)).digest("hex"),
     trials: manifest.cases.flatMap(task => (["codex", "vouch"] as const).map(arm => ({ caseId: task.id, arm, status: "pending" }))) };
@@ -27,6 +28,14 @@ function fixture(development = false) {
 }
 
 describe("source evaluation evidence API", () => {
+  it("accepts all twenty external source tasks but rejects paths outside a named Python module", () => {
+    const { root, id, record, save } = fixture(false, true);
+    expect(readSourceEvaluation(root, id)?.trials).toHaveLength(40);
+    record.manifest.cases[0]!.sourcePath = "../private.py";
+    record.manifestHash = createHash("sha256").update(JSON.stringify(record.manifest)).digest("hex"); save();
+    expect(readSourceEvaluation(root, id)).toBeNull();
+  });
+
   it("serves all forty development trials and rejects relabeling them as external CVEs", () => {
     const { root, id, record, save } = fixture(true);
     expect(readSourceEvaluation(root, id)?.trials).toHaveLength(40);

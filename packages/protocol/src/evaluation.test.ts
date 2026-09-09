@@ -13,6 +13,17 @@ function fixture(): SourceEvaluation {
 }
 
 describe("paired source evaluation metrics", () => {
+  it("keeps repair reference comparison distinct from label agreement and requires valid syntax", () => {
+    const evaluation = fixture();
+    evaluation.trials[0]!.syntaxValid = false;
+    expect(summarizeSourceEvaluation(evaluation)).toMatchObject({ differencePp: 0, referenceDifferencePp: 50, relativeReferenceChangePercent: 100 });
+    evaluation.status = "running";
+    expect(summarizeSourceEvaluation(evaluation).referenceDifferencePp).toBeNull();
+    evaluation.status = "completed";
+    for (const trial of evaluation.trials) if (trial.arm === "codex") trial.referenceMatch = false;
+    expect(summarizeSourceEvaluation(evaluation).relativeReferenceChangePercent).toBeNull();
+  });
+
   it("computes percentage points and relative change separately from actual trial verdicts", () => {
     const evaluation = fixture();
     evaluation.trials[0]!.verdict = "uncertain";

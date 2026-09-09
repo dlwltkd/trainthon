@@ -93,6 +93,7 @@ status, never the keys. `pnpm typecheck` checks both the harness and dashboard.
 Run a paired source evaluation with the native Codex CLI and Python 3 installed:
 
 ```bash
+pnpm cli eval --suite cvebench20     # all 20 external source repair tasks
 pnpm cli eval --suite development20  # all 20 fixed development tasks, both conditions
 pnpm cli eval --suite cvefixes --prepare
 pnpm cli eval --suite cvefixes
@@ -109,6 +110,12 @@ synthetic source tasks, including correct controls. Every run uses the same
 hash-pinned problems and grader. Harness and skill improvements can be evaluated
 on this set; the UI labels these as development-set tuning results, separately
 from the four-snapshot CVEfixes pilot.
+
+The [CVE-Bench source adaptation](bench/cvebench20/README.md) uses all 20 published
+locate tasks with complete named modules and pinned correction commits. Its
+headline score is module AST reference agreement; it does not reproduce the
+original benchmark's runtime security or regression tests. Use this harder set
+to inspect repair behavior, and retain the small development set as a basic check.
 
 The repository workflows accept a local Git path or an anonymous public HTTPS GitHub URL
 in the form `https://github.com/owner/repo` (an optional `.git` suffix and trailing

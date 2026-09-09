@@ -31,7 +31,7 @@ export interface ExecuteRepositoryReviewOptions {
 
 class IncompleteSourceReviewError extends Error {}
 const REQUEST_POLICY = Object.freeze({ maxRetries: 2, timeoutMs: 90_000, transport: "stream" as const, contextCheckpointBytes: 64_000 });
-const SOURCE_CONTEXT_POLICY = Object.freeze({ maxBytes: 192_000, maxFiles: 8, selection: "single-file-or-prompt-paths" });
+const SOURCE_CONTEXT_POLICY = Object.freeze({ maxBytes: 256_000, maxFiles: 8, selection: "single-file-or-prompt-paths" });
 const ASSESSMENT_POLICY = "independent-source-v1";
 
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");

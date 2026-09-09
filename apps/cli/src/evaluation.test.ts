@@ -6,7 +6,7 @@ import type { SourceEvaluation } from "@vouch/protocol";
 import { summarizeSourceEvaluation } from "@vouch/protocol";
 import { executeRepositoryReview } from "@vouch/engine";
 import { runCodexSource } from "./evaluation-codex.js";
-import { runSourceEvaluation } from "./evaluation.js";
+import { hasUncommittedEvaluationCode, runSourceEvaluation } from "./evaluation.js";
 
 vi.mock("@vouch/engine", () => ({ executeRepositoryReview: vi.fn() }));
 vi.mock("./evaluation-codex.js", () => ({ runCodexSource: vi.fn() }));
@@ -22,6 +22,14 @@ vi.mock("node:child_process", async importOriginal => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); process.exitCode = 0; });
 
 describe("paired evaluation orchestration", () => {
+  it("allows unrelated untracked presentation images while still rejecting uncommitted implementation", () => {
+    expect(hasUncommittedEvaluationCode("?? output/presentations/pitch/cover.png\0")).toBe(false);
+    expect(hasUncommittedEvaluationCode(" M packages/skills/src/index.ts\0")).toBe(true);
+    expect(hasUncommittedEvaluationCode("?? output/presentations/pitch/helper.ts\0")).toBe(true);
+    expect(hasUncommittedEvaluationCode(" M output/presentations/pitch/cover.png\0")).toBe(true);
+    expect(hasUncommittedEvaluationCode("?? output/presentations/pitch/cover.png\0?? apps/cli/new.ts\0")).toBe(true);
+  });
+
   it("runs every fixed problem in both arms, excludes reference data, and retains individual failures", async () => {
     const root = mkdtempSync(join(tmpdir(), "vouch-paired-evaluation-"));
     mkdirSync(join(root, "bench/development20"), { recursive: true });

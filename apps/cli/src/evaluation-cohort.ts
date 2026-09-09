@@ -39,12 +39,12 @@ export function evaluationCases(): EvaluationCase[] {
   })));
 }
 
-export async function prepareEvaluationSources(cacheDir: string, signal?: AbortSignal): Promise<void> {
+export async function prepareEvaluationSources(cacheDir: string, signal?: AbortSignal, cases: EvaluationCase[] = evaluationCases()): Promise<void> {
   mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
-  for (const task of evaluationCases()) {
-    const path = join(cacheDir, `${task.sourceSha256}.py`);
-    if (existsSync(path) && sha256(readFileSync(path)) === task.sourceSha256) continue;
-    const response = await fetch(task.sourceUrl, { signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]), redirect: "error" });
+  for (const task of cases) for (const [url, digest] of [[task.sourceUrl, task.sourceSha256], [task.referenceUrl, task.referenceSha256]] as const) {
+    const path = join(cacheDir, `${digest}.py`);
+    if (existsSync(path) && sha256(readFileSync(path)) === digest) continue;
+    const response = await fetch(url, { signal: AbortSignal.any([AbortSignal.timeout(30_000), ...(signal ? [signal] : [])]), redirect: "error" });
     if (!response.ok) throw new Error(`source download failed: HTTP ${response.status}`);
     const chunks: Uint8Array[] = [];
     let size = 0;
@@ -55,7 +55,7 @@ export async function prepareEvaluationSources(cacheDir: string, signal?: AbortS
       chunks.push(chunk);
     }
     const content = Buffer.concat(chunks);
-    if (sha256(content) !== task.sourceSha256) throw new Error(`pinned source hash mismatch: ${task.id}`);
+    if (sha256(content) !== digest) throw new Error(`pinned source hash mismatch: ${task.id}`);
     writeFileSync(`${path}.tmp`, content, { mode: 0o600 });
     renameSync(`${path}.tmp`, path);
   }
