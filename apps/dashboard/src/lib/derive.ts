@@ -775,7 +775,7 @@ export function statusDescription(view: RunView): string {
       const label = statusLabel(view.status, view.reason);
       if (label === "Request too large" || label === "Token budget limit") {
         const usage = view.usage.tokens.toLocaleString("en-US");
-        const allowance = view.budgets ? ` / ${view.budgets.maxTokens.toLocaleString("en-US")}` : "";
+        const allowance = view.budgets ? (view.budgets.maxTokens >= Number.MAX_SAFE_INTEGER / 2 ? " / unbounded" : ` / ${view.budgets.maxTokens.toLocaleString("en-US")}`) : "";
         const detail = label === "Request too large"
           ? "The next request's estimated token allowance exceeds this run's remaining limit. The request was not sent."
           : "The harness stopped at its per-run token allowance check.";

@@ -82,6 +82,18 @@ test("grep caps pages, preserves matching-line offsets and scopes searches", asy
   expect(exact.hits).toHaveLength(2); expect(exact.nextOffset).toBe(2);
 });
 
+test("grep explains empty regex-looking queries while preserving actual literal matches and evidence", async () => {
+  const f = await fixture({ "app.py": "rate_limit = 429\n", "literal.py": "literal text: left|right\n" });
+  const empty = await f.call("grep", { pattern: "rate_limit|429|throttle" });
+  expect(empty).toEqual({ pattern: "rate_limit|429|throttle", searchMode: "literal", hits: [], truncated: false, nextOffset: null, warning: "Literal search: regex operators are not expanded; use separate exact substring queries." });
+  await expect(f.call("report_progress", { ...plan, evidence: ["app.py"] })).rejects.toThrow("observed repository file");
+  const literal = await f.call("grep", { pattern: "left|right" });
+  expect(literal).toMatchObject({ pattern: "left|right", searchMode: "literal", hits: [expect.objectContaining({ file: "literal.py" })], truncated: false });
+  expect(literal).not.toHaveProperty("warning");
+  await f.call("report_progress", { ...plan, evidence: ["literal.py"] });
+  expect(await f.call("grep", { pattern: "missing_plain_text" })).not.toHaveProperty("warning");
+});
+
 test("directory pages bound long path inventories without dropping entries", async () => {
   const paths = Array.from({ length: 90 }, (_, index) => `${index.toString().padStart(3, "0")}_${"x".repeat(200)}.py`);
   const f = await fixture(Object.fromEntries(paths.map(path => [path, ""])));

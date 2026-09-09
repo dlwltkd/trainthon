@@ -125,6 +125,7 @@ describe("prompt-driven source review", () => {
     expect(record.status).toBe("PATCH_PROPOSED");
     expect(record.reviewModel).toEqual(reviewModel);
     expect(record.reviewSummary).toContain("Red observed subtraction");
+    expect(record.reviewStatus).toBe("complete");
     expect(record.reviewHandoffAfter).toEqual({ tokens: 9000, steps: 3 });
     expect(record.usage.steps).toBe(2);
     expect(record.findings.map(finding => [finding.agentRole, finding.findingId])).toEqual([["red", "addition"], ["blue", "addition"]]);
@@ -139,21 +140,49 @@ describe("prompt-driven source review", () => {
     assertFinal(record, f);
   });
 
-  it.each(["no source evidence", "empty summary"])("does not start Blue after Red returns %s", async missing => {
+  it.each(["I assume the source is fine.", ""])("does not start Blue without Red source evidence, regardless of final text: %j", async finalText => {
     const f = fixture();
     let blueInvoked = false;
     const record = await executeRepositoryReview({
       ...f.options, reviewModel,
-      reviewRunner: new ScriptedRunner(async tools => {
-        if (missing === "empty summary") await startReview(tools);
-        return missing === "empty summary" ? "" : "I assume the source is fine.";
-      }),
+      reviewRunner: new ScriptedRunner(async () => finalText),
       runner: new ScriptedRunner(async () => { blueInvoked = true; return "Unexpected Blue run"; }),
     });
     expect(record.status).toBe("INCOMPLETE_REVIEW");
     expect(record.reason).toContain("Blue was not started");
     expect(blueInvoked).toBe(false);
     expect(record.summary).toBe("");
+    expect(record).not.toHaveProperty("delivery");
+    assertFinal(record, f);
+  });
+
+  it.each([true, false])("passes an explicitly partial Red handoff without a fabricated summary; Blue source validation: %s", async blueReadsSource => {
+    const f = fixture();
+    const record = await executeRepositoryReview({
+      ...f.options, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { await startReview(tools); return ""; }),
+      runner: { run: async input => {
+        expect(input.prompt).toContain('"reviewStatus": "partial"');
+        expect(input.prompt).toContain("Red returned no final summary");
+        expect(input.prompt).toContain('"observedFiles": [\n    "src/add.ts"\n  ]');
+        return new ScriptedRunner(async tools => {
+          if (blueReadsSource) await startReview(tools);
+          else {
+            await tools.use_skill!({ skillId: "source-security-review", reason: "Inspect the partial Red handoff." });
+            await tools.report_progress!(progress());
+          }
+          return blueReadsSource ? "Blue independently inspected the source. No tests were run." : "I accept the handoff without reading source.";
+        }).run(input);
+      } },
+    });
+    expect(record.status).toBe(blueReadsSource ? "REVIEW_COMPLETE" : "INCOMPLETE_REVIEW");
+    expect(record.reviewStatus).toBe("partial");
+    expect(record.reviewSummary).toBe("");
+    expect(readFileSync(record.artifacts.redReviewSummary!, "utf8")).toBe("");
+    expect(JSON.parse(readFileSync(record.artifacts.redReviewHandoff!, "utf8"))).toMatchObject({ reviewStatus: "partial", summary: "", observedFiles: ["src/add.ts"], sourceEvidenceObserved: true, findings: [], harnessNote: expect.stringContaining("Red returned no final summary") });
+    expect(f.events.filter(event => event.type === "agent_summary" && event.agentRole === "red")).toEqual([]);
+    expect(f.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: "action_summary", summary: expect.stringContaining("partial handoff") })]));
+    expect(record.findings).toEqual([]);
     expect(record).not.toHaveProperty("delivery");
     assertFinal(record, f);
   });

@@ -357,5 +357,7 @@ export const DEFAULT_BUDGETS: Budgets = {
 /** Two-role repository reviews also account conservatively for gateways with missing usage. */
 export const DEFAULT_REPOSITORY_BUDGETS: Budgets = {
   ...DEFAULT_BUDGETS,
-  maxTokens: 500_000,
+  // Demo source reviews do not impose a cumulative token ceiling. Steps and
+  // wall time remain bounded so a stalled provider cannot run forever.
+  maxTokens: Number.MAX_SAFE_INTEGER,
 };

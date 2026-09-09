@@ -110,6 +110,12 @@ function literalSearch(workspace: TraceWorkspace, query: string, signal: AbortSi
   const hits: Array<{ file: string; line: number; column: number; text: string; textTruncated: boolean }> = [];
   let matched = 0;
   let bytes = 0;
+  const page = (truncated: boolean) => ({
+    pattern: query, searchMode: "literal" as const, hits, truncated, nextOffset: truncated ? offset + hits.length : null,
+    ...(!matched && /\||\.\*|\.\+|\\[bBdDsSwW]|^\^|\$$|\(\?:|\[[^\]]+\]/.test(query)
+      ? { warning: "Literal search: regex operators are not expanded; use separate exact substring queries." }
+      : {}),
+  });
   for (const file of listDirTool(workspace.dir, path)) {
     signal.throwIfAborted();
     if (file.endsWith("/")) continue;
@@ -125,11 +131,11 @@ function literalSearch(workspace: TraceWorkspace, query: string, signal: AbortSi
       const hit = { file, line: index + 1, column, text, textTruncated: column > 0 || text.length < line.length };
       const size = Buffer.byteLength(JSON.stringify(hit));
       if (size > SEARCH_PAGE_BYTES) throw new Error("matching repository path exceeds the search page limit");
-      if (hits.length && (hits.length >= limit || bytes + size > SEARCH_PAGE_BYTES)) return { hits, truncated: true, nextOffset: offset + hits.length };
+      if (hits.length && (hits.length >= limit || bytes + size > SEARCH_PAGE_BYTES)) return page(true);
       hits.push(hit); bytes += size;
     }
   }
-  return { hits, truncated: false, nextOffset: null };
+  return page(false);
 }
 
 function readTools(
@@ -173,8 +179,8 @@ function readTools(
     ),
     defineTool(
       "grep",
-      "Search for a literal substring, optionally scoped to a file/directory path. Returns at most 40 matching lines by default and 8 KB of snippets, with one hit per matching line. Pass nextOffset as offset to continue. Snippets include zero-based column and textTruncated; read_file can inspect the full line. Args: { pattern, path?, offset?, limit? }.",
-      z.object({ pattern: z.string().min(1).max(500), path: z.string().min(1).max(500).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() }),
+      "Search for one literal substring, not a regular expression. To find alternatives, batch separate calls with exact substrings; operators such as | are not expanded. Optionally scope to a file/directory path. Returns at most 40 matching lines by default and 8 KB of snippets, with one hit per matching line. Pass nextOffset as offset to continue. Snippets include zero-based column and textTruncated; read_file can inspect the full line. Args: { pattern, path?, offset?, limit? }.",
+      z.object({ pattern: z.string().min(1).max(500).describe("One exact literal substring, not regex. For alternatives such as rate_limit, 429, or throttle, use separate calls rather than joining with |."), path: z.string().min(1).max(500).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() }),
       ({ pattern, path, offset, limit }) => queue.run(() => {
         signal.throwIfAborted();
         trace.requireReady();

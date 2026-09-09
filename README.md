@@ -173,10 +173,10 @@ still requires no test suite, dependency installation, or Docker.
 
 File reads and searches return bounded pages with continuation positions. Large
 files can be changed through an exact, unique `edit_file` replacement instead of
-rewriting their full contents. Prompt workflows allow 500,000 cumulative
-input/output tokens across both roles, including conservative accounting when
+rewriting their full contents. Prompt workflows do not impose a cumulative
+token ceiling across both roles, including conservative accounting when
 a gateway omits usage. Red is asked to finish its investigation after 30% of that
-allowance or eight model steps, then make a final handoff within the shared cap.
+allowance or eight model steps, then make a final handoff within the shared run.
 This leaves capacity for Blue; the handoff must disclose unread source and
 unresolved questions. Existing-test and benchmark workflows retain their
 200,000-token default. Before each model request, the harness
