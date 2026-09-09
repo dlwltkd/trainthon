@@ -82,6 +82,30 @@ function assertFinal(record: Awaited<ReturnType<typeof executeRepositoryReview>>
 describe("prompt-driven source review", () => {
   const reviewModel = { provider: "compatible" as const, model: "review-test", baseURL: "https://api.routeway.ai/v1" };
 
+  it.each(["provider", "cancel"])("preserves candidate edits when %s interruption precedes final validation", async interruption => {
+    const f = fixture();
+    const controller = new AbortController();
+    const record = await executeRepositoryReview({
+      ...f.options, remediate: true, signal: controller.signal,
+      runner: new ScriptedRunner(async tools => {
+        await startReview(tools);
+        await edit(tools);
+        if (interruption === "cancel") { controller.abort(); return "Not a completed review."; }
+        throw new ProviderRequestError("Model API request failed (HTTP 502).", true);
+      }),
+    });
+    expect(record.status).toBe(interruption === "cancel" ? "CANCELLED" : "INFRA_ERROR");
+    expect(readFileSync(record.artifacts.patch, "utf8")).toContain(`+${corrected.trim()}`);
+    expect(record.changes.files).toEqual(["src/add.ts"]);
+    expect(record.changes.findingIdsByFile).toEqual({ "src/add.ts": ["addition"] });
+    expect(record.summary).toBe("");
+    expect(record).not.toHaveProperty("delivery");
+    expect(record.verification.protectedFilesUnchanged).toBe(true);
+    expect(readFileSync(join(f.repoPath, "src/add.ts"), "utf8")).toBe(original);
+    expect(f.events).toContainEqual(expect.objectContaining({ type: "action_summary", summary: expect.stringContaining("Saved candidate changes from the interrupted run") }));
+    assertFinal(record, f);
+  });
+
   it.each(["confirmed", "dismissed", "unresolved"])("records an independent %s assessment and rejects inherited or invented evidence", async verdict => {
     const f = fixture();
     const record = await executeRepositoryReview({

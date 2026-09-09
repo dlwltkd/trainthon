@@ -72,11 +72,21 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   let patch = "";
   let files: string[] = [];
   let protectedFilesUnchanged = false;
+  let captureAttempted = false;
   let delivery: { patchHash: string; files: Array<{ path: string; sha256: string; deleted: boolean }> } | undefined;
   const transition = (to: EngineState) => { logger.emit({ type: "state_change", from: stage, to }); stage = to; };
   const emitAgentEvent = (event: EventInput) => {
     if (options.remediate && stage === "REVIEW" && event.type === "skill_call" && event.agentRole === "blue" && event.skillId === "source-remediation") transition("PATCH");
     logger.emit({ ...event, ...("stage" in event ? { stage } : {}) });
+  };
+  const captureCandidate = async () => {
+    captureAttempted = true;
+    const diff = await captureLocalChanges(workspace as LocalWorkspace);
+    protectedFilesUnchanged = true;
+    patch = diff.patch; files = diff.changedFiles;
+    writeFileSync(artifacts.patch, patch, { mode: 0o600 });
+    logger.emit({ type: "diff_snapshot", patch });
+    for (const path of files) logger.emit({ type: "file_change", path, agentRole: "blue", patch: patchForFile(patch, path), artifact: artifacts.patch });
   };
   try {
     if (configError) throw configError;
@@ -163,12 +173,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     logger.emit({ type: "role_completed", agentRole: "blue", status: status === "REVIEW_COMPLETE" ? "complete" : "partial", observedFiles: toolset.observedFiles().length, findings: toolset.findings().length, ...(status === "INCOMPLETE_REVIEW" ? { reason } : {}), stage });
     ({ status, reason } = sourceReviewOutcome(status, reviewStatus, reason));
     if (options.remediate) {
-      const diff = await captureLocalChanges(workspace as LocalWorkspace);
-      protectedFilesUnchanged = true;
-      patch = diff.patch; files = diff.changedFiles;
-      writeFileSync(artifacts.patch, patch, { mode: 0o600 });
-      logger.emit({ type: "diff_snapshot", patch });
-      for (const path of files) logger.emit({ type: "file_change", path, agentRole: "blue", patch: patchForFile(patch, path), artifact: artifacts.patch });
+      await captureCandidate();
       if (files.length && status === "REVIEW_COMPLETE") {
         if (toolset.inspectedPatch() !== patch) {
           status = "INCOMPLETE_REVIEW"; reason = "The final patch was not inspected after the last source edit.";
@@ -186,6 +191,14 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     // File tools check the aborted signal before accessing the snapshot.
     await toolset?.drain();
     await reviewToolset?.drain();
+    if (workspace && options.remediate && toolset && !captureAttempted) {
+      try {
+        await captureCandidate();
+        if (files.length) logger.emit({ type: "action_summary", stage, summary: "Saved candidate changes from the interrupted run. Source validation is incomplete; draft PR delivery remains disabled." });
+      } catch (error) {
+        reason = `${reason ? `${reason} ` : ""}Could not preserve interrupted candidate changes: ${message(error)}`;
+      }
+    }
     try { workspace?.cleanup(); }
     catch (error) { status = "INFRA_ERROR"; reason = `Workspace cleanup failed: ${message(error)}`; }
     try { source?.cleanup(); }

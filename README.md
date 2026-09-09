@@ -223,7 +223,9 @@ failure attached. Blue may continue independent source validation, but a partial
 Red review leaves the overall run `INCOMPLETE_REVIEW`, preserves candidate changes,
 and disables draft PR delivery. Historical partial reviews are displayed the same
 way without rewriting their logs. Authentication errors, cancellation, and exhausted run limits still stop
-the run.
+the run. If Blue already edited source before an interruption, the harness checks
+protected-file boundaries and saves the candidate diff before cleaning up the
+workspace. Saving that diff does not complete validation or enable PR delivery.
 
 To repair against an existing regression, provide `--regression`. Both `--report`
 and a supplemental `--prompt` are optional; `--fix` cannot be combined with this
