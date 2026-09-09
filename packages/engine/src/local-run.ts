@@ -31,6 +31,7 @@ import {
 } from "@vouch/sandbox";
 import {
   BudgetExceededError,
+  canonicalizeModelSpec,
   estimateCost,
   requireRunnerForSpec,
   RunBudget,
@@ -167,8 +168,10 @@ function localConfigHash(options: ExecuteLocalRunOptions, patchHash: string | nu
     reportHash: sha256(options.report),
     regressionPath: options.regressionPath,
     patchHash,
-    model: options.mode === "live" ? options.model : { provider: "scripted", model: "supplied-patch" },
-    reviewModel: options.mode === "live" ? options.reviewModel ?? null : null,
+    model: options.mode === "live" ? canonicalizeModelSpec(options.model) : { provider: "scripted", model: "supplied-patch" },
+    reviewModel: options.mode === "live" && options.reviewModel
+      ? canonicalizeModelSpec(options.reviewModel)
+      : null,
     budgets: options.budgets,
     seed: options.seed,
   });
@@ -229,12 +232,16 @@ function scriptedPatchTool(workspace: LocalWorkspace, patchPath: string, signal:
 }
 
 function modelMetadata(spec: ModelSpec): ModelSpec {
-  return {
-    provider: spec.provider,
-    model: spec.model,
-    ...(spec.baseURL ? { baseURL: spec.baseURL } : {}),
-    ...(spec.apiKeyEnv ? { apiKeyEnv: spec.apiKeyEnv } : {}),
-  };
+  try {
+    return canonicalizeModelSpec(spec);
+  } catch {
+    return {
+      provider: spec.provider,
+      model: spec.model,
+      ...(spec.baseURL ? { baseURL: spec.baseURL } : {}),
+      ...(spec.apiKeyEnv ? { apiKeyEnv: spec.apiKeyEnv } : {}),
+    };
+  }
 }
 
 function validatePricing(pricing: Pricing | undefined): void {

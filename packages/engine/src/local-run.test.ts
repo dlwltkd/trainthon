@@ -206,6 +206,40 @@ describe("executeLocalRun", () => {
     expect(invoked).toBe(false);
   });
 
+  it("records and hashes canonical provider settings", async () => {
+    const first = fixture(true);
+    const second = fixture(true);
+    const reviewRunner = new ScriptedRunner(async () => "unused injected review runner");
+    const implicit = await executeLocalRun({
+      ...options(first, new SourceAwareRunner()),
+      reviewModel: { provider: "compatible", model: "glm-5.3-flash-uncensored" },
+      reviewRunner,
+    });
+    const explicit = await executeLocalRun({
+      ...options(second, new SourceAwareRunner()),
+      model: { provider: "openai", model: "gpt-test", apiKeyEnv: "OPENAI_API_KEY" },
+      reviewModel: {
+        provider: "compatible",
+        model: "glm-5.3-flash-uncensored",
+        baseURL: "https://api.routeway.ai/v1/",
+        apiKeyEnv: "ROUTEWAY_API_KEY",
+      },
+      reviewRunner,
+    });
+
+    expect(implicit.configHash).toBe(explicit.configHash);
+    expect(implicit.models).toEqual({
+      repair: { provider: "openai", model: "gpt-test", apiKeyEnv: "OPENAI_API_KEY" },
+      review: {
+        provider: "compatible",
+        model: "glm-5.3-flash-uncensored",
+        baseURL: "https://api.routeway.ai/v1",
+        apiKeyEnv: "ROUTEWAY_API_KEY",
+      },
+    });
+    expect(explicit.models).toEqual(implicit.models);
+  });
+
   it("reports invalid reproduction evidence without attempting repair", async () => {
     const input = fixture();
     class InvalidRegressionRunner extends SourceAwareRunner {
