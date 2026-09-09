@@ -26,6 +26,7 @@ function actionSummary(name: string, args: unknown): string {
     case "use_skill": return "Loading selected skill instructions";
     case "report_progress": return "Publishing a decision summary and plan";
     case "report_finding": return "Recording a source-backed finding";
+    case "assess_finding": return "Recording Blue's independent assessment";
     case "inspect_diff": return "Inspecting the candidate patch";
     default: return `Running ${name}`;
   }

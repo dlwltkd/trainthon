@@ -227,6 +227,28 @@ export interface FindingReportedEvent extends BaseEvent {
   stage: EngineState;
 }
 
+export interface FindingAssessedEvent extends BaseEvent {
+  type: "finding_assessed";
+  findingId: string;
+  verdict: "confirmed" | "dismissed" | "unresolved";
+  blueFindingId: string | null;
+  evidence: string[];
+  summary: string;
+  callId: string;
+  agentRole: "blue";
+  stage: EngineState;
+}
+
+export interface RoleCompletedEvent extends BaseEvent {
+  type: "role_completed";
+  agentRole: "red" | "blue";
+  status: "complete" | "partial";
+  observedFiles: number;
+  findings: number;
+  reason?: string;
+  stage: EngineState;
+}
+
 export interface TestRunEvent extends BaseEvent {
   type: "test_run";
   phase: string;
@@ -325,6 +347,8 @@ export type HarnessEvent =
   | GuidanceEvent
   | SkillCallEvent
   | FindingReportedEvent
+  | FindingAssessedEvent
+  | RoleCompletedEvent
   | AgentUpdateEvent
   | RepositoryEvent
   | FileChangeEvent

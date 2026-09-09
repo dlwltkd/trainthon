@@ -7,6 +7,7 @@ import type {
   GradeMetrics,
   HarnessEvent,
   ModelRequestEvent,
+  FindingAssessedEvent,
   RunStatus,
   TestRunEvent,
 } from "@vouch/protocol";
@@ -264,6 +265,7 @@ export interface RunView {
   skills: SkillItem[];
   decisions: DecisionItem[];
   findings: FindingItem[];
+  assessments: Map<string, FindingAssessedEvent>;
   currentDecision?: DecisionItem;
   activity: ActivityItem[];
   currentAction?: ToolCallItem;
@@ -430,6 +432,7 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
     skills: [],
     decisions: [],
     findings: [],
+    assessments: new Map(),
     activity: [],
     tools: new Map(),
     inspectedFiles: new Set(),
@@ -533,6 +536,16 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
         const item: FindingItem = { ...event, kind: "finding", id: `finding-${event.seq}` };
         view.findings = [...view.findings.filter((finding) => finding.findingId !== item.findingId || finding.agentRole !== item.agentRole), item];
         view.activity.push(item);
+        if (event.agentRole === "blue") for (const [id, assessment] of view.assessments) if (assessment.blueFindingId === event.findingId) view.assessments.delete(id);
+        break;
+      }
+      case "finding_assessed": {
+        view.assessments.set(event.findingId, event);
+        view.activity.push({ kind: "note", id: `assessment-${event.seq}`, seq: event.seq, ts: event.ts, agentRole: "blue", stage: event.stage, text: `Red ${event.findingId} → ${event.verdict}: ${event.summary}`, final: false });
+        break;
+      }
+      case "role_completed": {
+        view.activity.push({ kind: "check", id: `role-completed-${event.seq}`, seq: event.seq, ts: event.ts, label: `${roleLabel(event.agentRole)} source review ${event.status === "complete" ? "complete" : "incomplete"}`, status: event.status === "complete" ? "passed" : "warn", detail: `${event.observedFiles} files observed · ${event.findings} findings${event.reason ? `. ${event.reason}` : ""}` });
         break;
       }
       case "action_summary": {

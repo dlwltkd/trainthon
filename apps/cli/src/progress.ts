@@ -83,6 +83,13 @@ export function createRunProgress(
         print(`${role}finding [${event.severity}/${event.confidence}]: ${label(event.title)}`);
         print(`${role}evidence: ${event.evidence.map(label).join(", ")}`);
         break;
+      case "finding_assessed":
+        print(`blue assessment: Red ${label(event.findingId)} → ${event.verdict}`);
+        print(`blue evidence: ${event.evidence.map(label).join(", ")}`);
+        break;
+      case "role_completed":
+        print(`${role}source review ${event.status}: ${event.observedFiles} files, ${event.findings} findings`);
+        break;
       case "agent_update":
         print(`${role}decision: ${label(event.summary)}`);
         if (event.evidence.length) print(`${role}evidence: ${event.evidence.map(label).join(", ")}`);
@@ -115,8 +122,10 @@ export function createRunProgress(
         activity = `${role}waiting for the next agent action`;
         break;
       case "model_request":
-        activity = `${role}${event.phase === "tool_input" ? `preparing ${label(event.toolName ?? "tool arguments")}` : event.phase === "retry_wait" ? "waiting to retry; completed tool results preserved" : event.phase === "receiving" ? "receiving model response" : event.phase === "waiting" ? "waiting for model response" : `model request ${event.phase}`}`;
-        if (event.phase !== "completed") print(`${activity}${event.phase === "retry_wait" && event.retryAt ? ` (${Math.max(0, Math.ceil((event.retryAt - Date.now()) / 1000))}s)` : ""}`);
+        { const next = `${role}${event.phase === "tool_input" ? `preparing ${label(event.toolName ?? "tool arguments")}` : event.phase === "retry_wait" ? "waiting to retry; completed tool results preserved" : event.phase === "receiving" ? "receiving model response" : event.phase === "waiting" ? "waiting for model response" : `model request ${event.phase}`}`;
+          if (event.phase !== "completed" && (next !== activity || Date.now() - lastOutputAt >= 10_000)) print(`${next}${event.phase === "retry_wait" && event.retryAt ? ` (${Math.max(0, Math.ceil((event.retryAt - Date.now()) / 1000))}s)` : ""}`);
+          activity = next;
+        }
         break;
       case "agent_summary":
         print(`${role}summary saved`);

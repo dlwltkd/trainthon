@@ -82,6 +82,55 @@ function assertFinal(record: Awaited<ReturnType<typeof executeRepositoryReview>>
 describe("prompt-driven source review", () => {
   const reviewModel = { provider: "compatible" as const, model: "review-test", baseURL: "https://api.routeway.ai/v1" };
 
+  it.each(["confirmed", "dismissed", "unresolved"])("records an independent %s assessment and rejects inherited or invented evidence", async verdict => {
+    const f = fixture();
+    const record = await executeRepositoryReview({
+      ...f.options, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { await startReview(tools); await tools.report_finding!(finding); return "Inspect the arithmetic behavior independently."; }),
+      runner: new ScriptedRunner(async tools => {
+        const assessment = { findingId: "addition", verdict, blueFindingId: verdict === "confirmed" ? "blue-addition" : null, evidence: ["src/add.ts"], summary: "Source was independently inspected; no runtime tests executed." };
+        await tools.use_skill!({ skillId: "source-security-review", reason: "Independently inspect the source." });
+        await tools.report_progress!(progress());
+        await expect(tools.assess_finding!(assessment)).rejects.toThrow("observed file");
+        await startReview(tools);
+        await expect(tools.assess_finding!({ ...assessment, findingId: "invented" })).rejects.toThrow("Red's handoff");
+        if (verdict === "confirmed") {
+          await expect(tools.assess_finding!(assessment)).rejects.toThrow("your own confirmed finding");
+          await tools.report_finding!({ ...finding, id: "blue-addition" });
+        }
+        await tools.assess_finding!(assessment);
+        return "Independent source assessment recorded; no runtime testing.";
+      }),
+    });
+    expect(record.status, record.reason).toBe("REVIEW_COMPLETE");
+    expect(record.assessments).toEqual([expect.objectContaining({ findingId: "addition", verdict, evidence: ["src/add.ts"] })]);
+    expect(record.unassessedFindingIds).toEqual([]);
+    expect(f.events.filter(event => event.type === "role_completed").map(event => [event.agentRole, event.status])).toEqual([["red", "complete"], ["blue", "complete"]]);
+    assertFinal(record, f);
+  });
+
+  it.each([false, true])("requires an explicit current assessment instead of final prose; revised Blue finding: %s", async revise => {
+    const f = fixture();
+    const record = await executeRepositoryReview({
+      ...f.options, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { await startReview(tools); await tools.report_finding!(finding); return "A source finding is ready for validation."; }),
+      runner: new ScriptedRunner(async tools => {
+        await startReview(tools);
+        if (revise) {
+          await tools.report_finding!(finding);
+          await tools.assess_finding!({ findingId: "addition", verdict: "confirmed", blueFindingId: "addition", evidence: ["src/add.ts"], summary: "Arithmetic mismatch observed." });
+          await tools.report_finding!({ ...finding, confidence: "potential" });
+        }
+        return "I assessed every Red finding in prose.";
+      }),
+    });
+    expect(record.status).toBe("INCOMPLETE_REVIEW");
+    expect(record.unassessedFindingIds).toEqual(["addition"]);
+    expect(record.assessments).toEqual([]);
+    expect(record).not.toHaveProperty("delivery");
+    assertFinal(record, f);
+  });
+
   it("hands Red findings to Blue and requires Blue's own source evidence before editing", async () => {
     const f = fixture();
     const phases: string[] = [];
@@ -118,6 +167,7 @@ describe("prompt-driven source review", () => {
           await expect(tools.write_file!({ path: "src/add.ts", content: corrected })).rejects.toThrow("confirmed source-backed finding");
           await startReview(tools);
           await edit(tools);
+          await tools.assess_finding!({ findingId: "addition", verdict: "confirmed", blueFindingId: "addition", evidence: ["src/add.ts"], summary: "Independently confirmed the arithmetic mismatch." });
           await inspect(tools);
           await tools.report_progress!(progress(["src/add.ts"], true));
           return "Blue independently confirmed Red's arithmetic observation and inspected the proposed correction. Tests were not run.";
@@ -224,6 +274,7 @@ describe("prompt-driven source review", () => {
           await expect(tools.write_file!({ path: "src/add.ts", content: corrected })).rejects.toThrow("confirmed source-backed finding");
           await startReview(tools);
           await edit(tools);
+          await tools.assess_finding!({ findingId: "addition", verdict: "confirmed", blueFindingId: "addition", evidence: ["src/add.ts"], summary: "Independently confirmed the arithmetic mismatch." });
           await inspect(tools);
           return "Blue independently confirmed the observed arithmetic mismatch and inspected the correction. Tests were not run.";
         }).run(input);
@@ -327,6 +378,7 @@ describe("prompt-driven source review", () => {
       }),
       runner: new ScriptedRunner(async tools => {
         await startReview(tools); await tools.report_progress!(progress(["src/add.ts"], true));
+        await tools.assess_finding!({ findingId: "wrong-claim", verdict: "dismissed", blueFindingId: null, evidence: ["src/add.ts"], summary: "The inspected function subtracts its second operand; it does not multiply." });
         return "Rejected wrong-claim: the observed source subtracts and does not multiply. No change proposed under this claim; tests were not run.";
       }),
     });

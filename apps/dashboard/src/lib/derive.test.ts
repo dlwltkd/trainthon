@@ -10,6 +10,13 @@ function trace(...payloads: Payload[]): HarnessEvent[] {
 }
 
 describe("agent activity derivation", () => {
+  it("links Blue's verdict to Red and invalidates it when the linked Blue finding changes", () => {
+    const assessment: Payload = { type: "finding_assessed", findingId: "red-1", verdict: "confirmed", blueFindingId: "blue-1", evidence: ["src/add.ts"], summary: "Independently read the arithmetic source.", callId: "assessment", agentRole: "blue", stage: "REVIEW" };
+    const events = trace(assessment, { type: "finding_reported", findingId: "blue-1", title: "Arithmetic", severity: "low", confidence: "potential", evidence: ["src/add.ts"], summary: "Revised confidence", recommendation: "Review", callId: "report", agentRole: "blue", stage: "REVIEW" });
+    expect(deriveRun(events.slice(0, 2))!.assessments.get("red-1")?.verdict).toBe("confirmed");
+    expect(deriveRun(events)!.assessments.size).toBe(0);
+  });
+
   it("updates one model row per attempt and keeps retry, execution, and replay states separate", () => {
     const request = { type: "model_request" as const, requestId: "request-1", attempt: 1, transport: "stream" as const, agentRole: "red" as const, stage: "REVIEW" as const, outputChars: 0, elapsedMs: 0 };
     const events = trace(

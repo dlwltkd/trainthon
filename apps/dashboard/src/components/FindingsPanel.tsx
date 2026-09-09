@@ -7,12 +7,17 @@ import { Chip, Empty, Mono, Panel, PanelHeader, RoleChip, type Tone } from "./ui
 const severityTone: Record<FindingItem["severity"], Tone> = { info: "info", low: "neutral", medium: "warn", high: "fail", critical: "fail" };
 
 export function FindingCard({ finding, view, files, onEvidence }: { finding: FindingItem; view: RunView; files: string[]; onEvidence: (target: EvidenceTarget) => void }) {
+  const assessment = finding.agentRole === "red" ? view.assessments.get(finding.findingId) : undefined;
   return <article className="space-y-3 rounded-lg border border-line bg-panel p-3.5">
     <div className="flex flex-wrap items-center gap-1.5"><Chip tone={severityTone[finding.severity]}>{finding.severity}</Chip><Chip tone={finding.confidence === "confirmed" ? "info" : "warn"}>{finding.agentRole === "red" ? finding.confidence === "confirmed" ? "Source-supported claim" : "Candidate" : finding.confidence === "confirmed" ? "Confirmed in source" : "Potential"}</Chip><RoleChip role={finding.agentRole} /><Mono className="ml-auto text-[0.75em] text-ink-3">{finding.findingId}</Mono></div>
     <h3 className="text-[1em] font-semibold">{finding.title}</h3>
     <p className="whitespace-pre-wrap text-[0.9em] leading-relaxed text-ink-2">{finding.summary}</p>
     <div><div className="mb-1.5 text-[0.75em] font-semibold uppercase tracking-wide text-ink-3">Recorded source evidence</div><EvidenceLinks references={finding.evidence} view={view} files={files} onEvidence={onEvidence} /></div>
     <div className="rounded-md bg-canvas p-2.5"><div className="mb-1 text-[0.75em] font-semibold uppercase tracking-wide text-ink-3">Recommendation</div><p className="whitespace-pre-wrap text-[0.88em] leading-relaxed text-ink-2">{finding.recommendation}</p></div>
+    {finding.agentRole === "red" && <div className="space-y-2 border-t border-line pt-3">
+      <div className="flex flex-wrap items-center gap-2"><RoleChip role="blue" /><span className="text-[0.85em] font-semibold">Independent assessment</span><Chip tone={assessment?.verdict === "confirmed" ? "info" : assessment?.verdict === "dismissed" ? "neutral" : "warn"}>{assessment ? assessment.verdict : "Not assessed"}</Chip></div>
+      {assessment && <><p className="text-[0.88em] leading-relaxed text-ink-2">{assessment.summary}</p><EvidenceLinks references={assessment.evidence} view={view} files={files} onEvidence={onEvidence} />{assessment.blueFindingId && <p className="text-[0.78em] text-ink-3">Linked Blue finding: <Mono>{assessment.blueFindingId}</Mono></p>}</>}
+    </div>}
   </article>;
 }
 

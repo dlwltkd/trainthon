@@ -1,7 +1,7 @@
 import { z, type ZodType } from "zod";
 import { join } from "node:path";
 import { lstatSync } from "node:fs";
-import type { EventInput, FindingReportedEvent } from "@vouch/protocol";
+import type { EventInput, FindingReportedEvent, FindingAssessedEvent } from "@vouch/protocol";
 import type { AgentTool } from "@vouch/model";
 import { createAgentTrace, type AgentTrace, type TraceWorkspace } from "./agent-trace.js";
 import { REPOSITORY_REVIEW_SKILLS, SOURCE_REPAIR_SKILLS } from "@vouch/skills";
@@ -198,12 +198,13 @@ export function buildLocalReviewTools(workspace: LocalWorkspace, signal: AbortSi
   return [...trace.tools, ...readTools(workspace, signal, queue, trace)];
 }
 
-export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortSignal, onEvent: (event: EventInput) => void, remediate = false, role: "red" | "blue" = "blue") {
+export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortSignal, onEvent: (event: EventInput) => void, remediate = false, role: "red" | "blue" = "blue", redFindingIds: readonly string[] = []) {
   const queue = new SerialToolQueue();
   const canEdit = remediate && role === "blue";
   const stage = canEdit ? "PATCH" : "REVIEW";
   const trace = createAgentTrace({ workspace, signal, onEvent, role, stage, skills: canEdit ? SOURCE_REPAIR_SKILLS : REPOSITORY_REVIEW_SKILLS, enqueue: operation => queue.run(operation) });
   const findings = new Map<string, Omit<FindingReportedEvent, "runId" | "seq" | "ts">>();
+  const assessments = new Map<string, Omit<FindingAssessedEvent, "runId" | "seq" | "ts">>();
   const changeFindings = new Map<string, string[]>();
   let inspectedPatch: string | undefined;
   const findingSchema = z.object({
@@ -224,9 +225,36 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
       const { id, ...details } = finding;
       const event = { type: "finding_reported", findingId: id, ...details, callId: context.callId, agentRole: role, stage } as const;
       findings.set(id, event); onEvent(event);
-      return { recorded: true, findingId: id };
+      const reassessFindingIds: string[] = [];
+      for (const [redId, assessment] of assessments) if (assessment.blueFindingId === id) { assessments.delete(redId); reassessFindingIds.push(redId); }
+      return { recorded: true, findingId: id, ...(reassessFindingIds.length ? { reassessFindingIds } : {}) };
     }),
   }];
+  if (role === "blue" && redFindingIds.length) {
+    const schema = z.object({
+      findingId: z.string().min(1).max(60), verdict: z.enum(["confirmed", "dismissed", "unresolved"]),
+      blueFindingId: z.string().min(1).max(60).nullable().describe("Your own confirmed report_finding ID for a confirmed verdict; null otherwise."),
+      evidence: z.array(z.string().min(1).max(500)).min(1).describe("Exact source paths you independently read or searched."),
+      summary: z.string().trim().min(1).max(1500),
+    }).strict();
+    tools.push({ name: "assess_finding", description: "Independently assess a Red finding after inspecting its source. Record confirmed, dismissed, or unresolved with your own observed evidence. Confirmed requires your own confirmed report_finding ID. Assess every Red finding before your final summary; reassess if you revise its linked Blue finding.", schema,
+      execute: (args, context) => queue.run(() => {
+        signal.throwIfAborted(); trace.requireReady();
+        const assessment = schema.parse(args);
+        if (!redFindingIds.includes(assessment.findingId)) throw new Error("findingId must identify a finding in Red's handoff");
+        assessment.evidence = [...new Set(assessment.evidence)];
+        trace.assertEvidence(assessment.evidence);
+        if (assessment.verdict === "confirmed") {
+          const own = assessment.blueFindingId && findings.get(assessment.blueFindingId);
+          if (!own || own.confidence !== "confirmed" || !own.evidence.some(path => assessment.evidence.includes(path))) throw new Error("confirmation requires your own confirmed finding with matching observed evidence");
+        } else if (assessment.blueFindingId !== null) throw new Error("blueFindingId must be null for a dismissed or unresolved verdict");
+        if (!context?.callId) throw new Error("a logged call is required");
+        const event = { type: "finding_assessed", ...assessment, callId: context.callId, agentRole: "blue", stage } as const;
+        assessments.set(assessment.findingId, event); onEvent(event);
+        return { recorded: true, remainingFindingIds: redFindingIds.filter(id => !assessments.has(id)) };
+      }),
+    });
+  }
   if (canEdit) {
     const repair = workspace as LocalWorkspace;
     const applySourceChange = (path: string, findingId: string | undefined, content: () => string) => {
@@ -248,7 +276,7 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
       return { ...diff, checks: { protectedFilesUnchanged: true, testsRun: false } };
     })));
   }
-  return { tools, drain: () => queue.drain(), findings: () => [...findings.values()], observedFiles: () => trace.observedFiles(), inspectedPatch: () => inspectedPatch, changeFindings: () => Object.fromEntries(changeFindings) };
+  return { tools, drain: () => queue.drain(), findings: () => [...findings.values()], assessments: () => [...assessments.values()], unassessedFindingIds: () => redFindingIds.filter(id => !assessments.has(id)), observedFiles: () => trace.observedFiles(), inspectedPatch: () => inspectedPatch, changeFindings: () => Object.fromEntries(changeFindings) };
 }
 
 export interface LocalRepairToolset {

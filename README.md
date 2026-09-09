@@ -163,8 +163,12 @@ pnpm cli run \
   --mode live
 ```
 
-Blue must read the source and record its own confirmed findings before editing;
-Red's findings alone do not authorize a change. Only
+Blue must read the source and record its own confirmed findings before editing.
+For each Red finding, Blue calls `assess_finding` with a confirmed, dismissed,
+or unresolved verdict and independently observed source paths. Confirmation links
+to Blue's own recorded finding. The harness requires an assessment for every Red
+finding before completing the review; the dashboard displays each verdict beside
+the original claim. Only
 application source may change, and the final diff must be inspected with protected
 files unchanged. A completed candidate is `PATCH_PROPOSED` with scope
 `source_patch` and `testsRun: false`: it has not passed tests or runtime
@@ -188,7 +192,12 @@ not indicate the provider account's balance.
 
 Prompt reviews retry transient model API failures (HTTP 408, 429, and 5xx),
 connection failures marked retryable by the provider, and empty replies up to
-twice per request. Each attempt has a 90-second deadline. Retries retain completed
+twice per request. Responses are streamed, with a 90-second inactivity deadline.
+Active streams can continue within the shared run deadline. The timeline shows
+waiting, receiving, tool preparation, first-response latency, and retry countdowns.
+Only execution metadata and public decision summaries are displayed.
+Tool calls execute after a complete response; interrupted streams cannot execute
+partially received tools. Retries retain completed
 tool results and count toward the shared run limits; they do not restart the
 review. The timeline shows the HTTP status or timeout and the retry delay.
 `Retry-After` is honored when supplied; otherwise retries wait one and two
@@ -197,8 +206,10 @@ without usage are conservatively accounted and marked unknown. Repeated empty
 Red replies produce an explicitly partial handoff only when source was observed.
 If Red's transient API errors persist after retries, the harness retains its
 observed source and recorded findings in a partial handoff, with the provider
-failure attached. Blue must independently validate that source before proposing
-changes. Authentication errors, cancellation, and exhausted run limits still stop
+failure attached. Blue may continue independent source validation, but a partial
+Red review leaves the overall run `INCOMPLETE_REVIEW`, preserves candidate changes,
+and disables draft PR delivery. Historical partial reviews are displayed the same
+way without rewriting their logs. Authentication errors, cancellation, and exhausted run limits still stop
 the run.
 
 To repair against an existing regression, provide `--regression`. Both `--report`
