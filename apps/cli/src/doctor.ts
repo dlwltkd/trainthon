@@ -80,8 +80,11 @@ export async function runDoctor(
 
       try {
         const result = await invokeProbe(model, { env, signal: dependencies.signal });
+        const usage = result.usageKnown === false
+          ? `usageBound<=${result.inputTokens}+${result.outputTokens} accounting=conservative`
+          : `usage=${result.inputTokens}+${result.outputTokens}`;
         lines.push(
-          `    toolCall=passed latencyMs=${result.latencyMs} usage=${result.inputTokens}+${result.outputTokens}`,
+          `    toolCall=passed latencyMs=${result.latencyMs} ${usage}`,
         );
       } catch (error) {
         ok = false;

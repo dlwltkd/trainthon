@@ -214,7 +214,7 @@ export async function probeModel(
   const canonical = canonicalizeModelSpec(spec);
   const runner = options.runner ?? requireRunnerForSpec(canonical, options.env);
   const nonce = randomBytes(16).toString("hex");
-  const limits = { maxTokens: 4_096, maxSteps: 1, maxWallMs: 15_000 } as const;
+  const limits = { maxTokens: 4_096, maxSteps: 1, maxWallMs: 45_000 } as const;
   const budget = new RunBudget(limits, options.signal);
   let attempts = 0;
   let completed = 0;
@@ -237,7 +237,6 @@ export async function probeModel(
       budgets: limits,
       budget,
       model: canonical.model,
-      seed: 1,
       toolChoice: "required",
       onEvent: () => undefined,
     });

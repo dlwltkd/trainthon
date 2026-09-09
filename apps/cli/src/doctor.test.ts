@@ -69,6 +69,17 @@ describe("provider doctor", () => {
     expect(result.output.match(/toolCall=passed/g)).toHaveLength(2);
   });
 
+  it("labels a conservative usage bound when the provider omits token counts", async () => {
+    const probe = vi.fn(async (): Promise<ModelProbeResult> => ({
+      ...passed(), usageKnown: false,
+    }));
+    const result = await runDoctor({ live: true, checks: [red] }, {
+      env: { ROUTEWAY_API_KEY: "routeway-secret" }, probe,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("usageBound<=8+3 accounting=conservative");
+  });
+
   it.each([
     [401, "authentication failed (401)"],
     [404, "model or endpoint was not found (404)"],
