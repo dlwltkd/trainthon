@@ -6,9 +6,19 @@ import type { EventInput } from "@vouch/protocol";
 import { BudgetExceededError, RunBudget, RunCancelledError } from "./budget.js";
 import { estimateRequestInputTokens, SdkRunner } from "./sdk-runner.js";
 import { ScriptedRunner } from "./scripted.js";
-import { createRunnerForSpec, requireRunnerForSpec, resolveRunnerFromEnv, validateModelSpec } from "./providers.js";
+import {
+  GATEWAYS,
+  ROUTEWAY_GLM_FLASH_UNCENSORED,
+  canonicalizeModelSpec,
+  createCompatibleRunner,
+  createRunnerForSpec,
+  probeModel,
+  requireRunnerForSpec,
+  resolveRunnerFromEnv,
+  validateModelSpec,
+} from "./providers.js";
 import { estimateCost } from "./pricing.js";
-import type { AgentRunInput } from "./types.js";
+import type { AgentRunInput, AgentRunner } from "./types.js";
 
 const limits = { maxTokens: 20_000, maxSteps: 4, maxWallMs: 10_000 };
 const allocated: RunBudget[] = [];
@@ -98,6 +108,15 @@ describe("SdkRunner", () => {
     expect(run.events).toContainEqual(expect.objectContaining({ type: "action_summary", callId: "read-1", summary: "Reading src/example.ts" }));
     await new ScriptedRunner(async () => "reviewed").run({ ...run, role: "red" });
     expect(run.budget!.usage).toEqual({ inputTokens: 20, outputTokens: 4, steps: 3 });
+  });
+
+  it("passes an explicit tool choice to the provider", async () => {
+    const model = new MockLanguageModelV2({ doGenerate: reply() });
+    const run = input();
+    run.tools = [fileTool()];
+    run.toolChoice = "required";
+    await new SdkRunner(() => model).run(run);
+    expect(model.doGenerateCalls[0]?.toolChoice).toEqual({ type: "required" });
   });
 
   it("retains provider usage when a tool fails and emits its error", async () => {
@@ -219,6 +238,30 @@ describe("ScriptedRunner", () => {
 });
 
 describe("explicit provider configuration", () => {
+  it("canonicalizes provider defaults and Routeway URLs", () => {
+    expect(canonicalizeModelSpec({ provider: "anthropic", model: "claude-example" })).toEqual({
+      provider: "anthropic", model: "claude-example", apiKeyEnv: "ANTHROPIC_API_KEY",
+    });
+    expect(canonicalizeModelSpec({
+      provider: "compatible", model: ROUTEWAY_GLM_FLASH_UNCENSORED, baseURL: `${GATEWAYS.routeway}/`,
+    })).toEqual({
+      provider: "compatible", model: ROUTEWAY_GLM_FLASH_UNCENSORED,
+      baseURL: GATEWAYS.routeway, apiKeyEnv: "ROUTEWAY_API_KEY",
+    });
+  });
+
+  it("does not send Routeway credentials to an unrelated compatible endpoint by default", () => {
+    expect(() => canonicalizeModelSpec({
+      provider: "compatible", model: "custom", baseURL: "https://provider.example/v1",
+    })).toThrow("requires an explicit apiKeyEnv");
+    expect(canonicalizeModelSpec({
+      provider: "compatible", model: "custom", baseURL: "https://provider.example/v1/", apiKeyEnv: "CUSTOM_KEY",
+    })).toEqual({
+      provider: "compatible", model: "custom", baseURL: "https://provider.example/v1", apiKeyEnv: "CUSTOM_KEY",
+    });
+    expect(() => canonicalizeModelSpec({ provider: "openai", model: "gpt-example", apiKeyEnv: "" })).toThrow("environment variable");
+  });
+
   it("does not fall back to another provider with a key", () => {
     expect(resolveRunnerFromEnv({ preferred: "anthropic", model: "claude-example", env: { OPENAI_API_KEY: "fixture" } })).toBeNull();
     expect(resolveRunnerFromEnv({ model: "gpt-example", env: { ANTHROPIC_API_KEY: "fixture" } })).toBeNull();
@@ -239,5 +282,80 @@ describe("explicit provider configuration", () => {
   it("keeps unconfigured model cost unavailable", () => {
     expect(estimateCost(1000, 500)).toBeNull();
     expect(estimateCost(1_000_000, 1_000_000, { inputPerMTok: 2, outputPerMTok: 4 })).toBe(6);
+  });
+});
+
+describe("live provider probe", () => {
+  it("performs one Routeway-compatible required tool call without exposing the key", async () => {
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = [];
+    const fetchMock: NonNullable<Parameters<typeof createCompatibleRunner>[0]["fetch"]> = async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push({ url: String(input), headers: new Headers(init?.headers), body });
+      const nonce = JSON.stringify(body).match(/[a-f0-9]{32}/)?.[0];
+      if (!nonce) throw new Error("probe nonce missing from request");
+      return new Response(JSON.stringify({
+        id: "chatcmpl-probe",
+        object: "chat.completion",
+        created: 1,
+        model: ROUTEWAY_GLM_FLASH_UNCENSORED,
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [{
+              id: "call-probe",
+              type: "function",
+              function: { name: "connection_probe", arguments: JSON.stringify({ nonce }) },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+        usage: { prompt_tokens: 17, completion_tokens: 5, total_tokens: 22 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const runner = createCompatibleRunner({
+      apiKey: "  routeway-test-secret  ",
+      baseURL: `${GATEWAYS.routeway}/`,
+      name: "routeway",
+      fetch: fetchMock,
+    });
+
+    const result = await probeModel({
+      provider: "compatible",
+      model: ROUTEWAY_GLM_FLASH_UNCENSORED,
+    }, { runner });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(`${GATEWAYS.routeway}/chat/completions`);
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer routeway-test-secret");
+    expect(requests[0]?.body).toMatchObject({
+      model: ROUTEWAY_GLM_FLASH_UNCENSORED,
+      tool_choice: "required",
+      max_completion_tokens: expect.any(Number),
+      tools: [{ type: "function", function: { name: "connection_probe" } }],
+    });
+    expect(requests[0]?.body).not.toHaveProperty("seed");
+    expect(requests[0]?.body).not.toHaveProperty("max_tokens");
+    expect(result).toMatchObject({
+      provider: "compatible",
+      model: ROUTEWAY_GLM_FLASH_UNCENSORED,
+      apiKeyEnv: "ROUTEWAY_API_KEY",
+      baseURL: GATEWAYS.routeway,
+      inputTokens: 17,
+      outputTokens: 5,
+      steps: 1,
+      toolCalls: 1,
+      latencyMs: expect.any(Number),
+    });
+    expect(JSON.stringify(result)).not.toContain("routeway-test-secret");
+  });
+
+  it("fails when a runner does not perform the required probe call", async () => {
+    const runner: AgentRunner = {
+      run: async () => ({ finalText: "skipped", inputTokens: 1, outputTokens: 1, steps: 1 }),
+    };
+    await expect(probeModel({ provider: "openai", model: "gpt-example" }, { runner }))
+      .rejects.toThrow("exactly one required");
   });
 });

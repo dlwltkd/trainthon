@@ -20,6 +20,8 @@ export interface AgentRunInput {
   role?: "solo" | "red" | "blue";
   stage?: EngineState;
   seed?: number;
+  /** Constrain whether the provider may or must call one of the supplied tools. */
+  toolChoice?: "auto" | "required" | "none";
   /** Emit events to the run log as the agent works. */
   onEvent: (event: EventInput) => void;
 }

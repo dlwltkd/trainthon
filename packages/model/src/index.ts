@@ -17,9 +17,12 @@ export {
   createRunner,
   createRunnerForSpec,
   requireRunnerForSpec,
+  canonicalizeModelSpec,
   validateModelSpec,
+  probeModel,
   providerForModel,
   resolveRunnerFromEnv,
+  ROUTEWAY_GLM_FLASH_UNCENSORED,
 } from "./providers.js";
 export type {
   ProviderName,
@@ -27,6 +30,8 @@ export type {
   ProviderInfo,
   ResolvedRunner,
   ModelSpec,
+  CanonicalModelSpec,
+  ModelProbeResult,
 } from "./providers.js";
 export { computeCost, estimateCost, DEFAULT_PRICING } from "./pricing.js";
 export type { Pricing } from "./pricing.js";

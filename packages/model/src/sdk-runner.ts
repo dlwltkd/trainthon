@@ -132,6 +132,7 @@ export class SdkRunner implements AgentRunner {
         system: input.system,
         prompt: input.prompt,
         tools,
+        toolChoice: input.toolChoice,
         seed: input.seed,
         maxRetries: 0,
         abortSignal: budget.signal,
