@@ -418,6 +418,12 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
   ): Promise<StructuredTestResult> => {
     if (!runner || !budget) throw new Error("project test runner is not prepared");
     budget.assertActive();
+    const label = phase.startsWith("verification-") ? "verification" : "baseline";
+    logger.emit({
+      type: "action_summary",
+      summary: `Running ${label} ${selection} tests`,
+      stage: state,
+    });
     const testStartedAt = performance.now();
     const result = await runner.runTests(directory, selection, {
       signal: budget.signal,
@@ -466,6 +472,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
 
     budget = new RunBudget(options.budgets, options.signal);
     transition("CONTEXT");
+    logger.emit({ type: "action_summary", summary: "Snapshotting the selected repository commit", stage: "CONTEXT" });
     workspace = await prepareLocalWorkspace({
       repoPath: options.repoPath,
       ref: options.ref,
@@ -500,10 +507,12 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
     });
 
     runner = options.testRunner ?? createProjectTestRunner(workspace);
+    logger.emit({ type: "action_summary", summary: "Preparing test dependencies in Docker", stage: "CONTEXT" });
     await runner.prepare(workspace, { signal: budget.signal, timeoutMs: remaining(SETUP_TIMEOUT_MS) });
     runtime = runner.runtime ?? null;
     writeJson(artifacts.repository, { ...repository, runtime });
     setupComplete = true;
+    logger.emit({ type: "action_summary", summary: "Test environment ready", stage: "CONTEXT" });
 
     const baselineFunctional = await runTest("baseline-functional", workspace.baselineDir, "functional");
     if (!baselineFunctional.passed) {
@@ -643,8 +652,9 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
         });
 
         await recordDiff();
-        const verificationDir = await createVerificationWorkspace(workspace);
         transition("VERIFY");
+        logger.emit({ type: "action_summary", summary: "Preparing a fresh verification workspace", stage: "VERIFY" });
+        const verificationDir = await createVerificationWorkspace(workspace);
         const verifiedRegression = await runTest("verification-regression", verificationDir, "regression");
         regressionManifestMatched = sameManifest(baselineRegressionManifest, verifiedRegression.testManifest);
         regressionPassed = verifiedRegression.passed && regressionManifestMatched;
@@ -790,6 +800,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
   writeJson(artifacts.record, { ...buildRecord(Date.now()), provisional: true });
 
   acceptingEvidence = false;
+  logger.emit({ type: "action_summary", summary: "Saving run evidence and cleaning up the sandbox", stage: "DONE" });
   try {
     if (runner) await settleWithin(runner.cleanup(), SETTLE_TIMEOUT_MS, "runner cleanup");
   } catch (error) {

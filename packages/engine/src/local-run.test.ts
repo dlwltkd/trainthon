@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { ScriptedRunner, type AgentRunner } from "@vouch/model";
+import type { HarnessEvent } from "@vouch/protocol";
 import type {
   LocalWorkspace,
   ProjectTestRunner,
@@ -148,6 +149,39 @@ afterEach(() => {
 });
 
 describe("executeLocalRun", () => {
+  it("publishes setup and test activity while the work is still pending", async () => {
+    const input = fixture(true);
+    const events: HarnessEvent[] = [];
+    let beginSetup!: () => void;
+    let releaseSetup!: () => void;
+    const enteredSetup = new Promise<void>(resolve => { beginSetup = resolve; });
+    const setupGate = new Promise<void>(resolve => { releaseSetup = resolve; });
+    class ObservedRunner extends SourceAwareRunner {
+      override async prepare(workspace: LocalWorkspace) {
+        beginSetup();
+        await setupGate;
+        await super.prepare(workspace);
+      }
+      override async runTests(dir: string, selection: TestSelection) {
+        expect(events.at(-1)).toMatchObject({ type: "action_summary", summary: `Running baseline ${selection} tests` });
+        return super.runTests(dir, selection);
+      }
+    }
+    const pending = executeLocalRun({ ...options(input, new ObservedRunner()), onEvent: event => events.push(event) });
+    try {
+      await enteredSetup;
+      expect(events.at(-1)).toMatchObject({ type: "action_summary", summary: "Preparing test dependencies in Docker" });
+      expect(events.some(event => event.type === "test_run" || event.type === "run_end")).toBe(false);
+      const runId = events[0]!.runId;
+      const persisted = readFileSync(join(input.runs, runId, "events.jsonl"), "utf8");
+      expect(persisted).toContain("Preparing test dependencies in Docker");
+    } finally { releaseSetup(); }
+    const record = await pending;
+    expect(record.status).toBe("NOT_REPRODUCIBLE");
+    expect(events.filter(event => event.type === "test_run")).toHaveLength(2);
+    expect(events.at(-1)?.type).toBe("run_end");
+  });
+
   it("reports repository tests passed without claiming independent security verification", async () => {
     const input = fixture();
     const runner = new SourceAwareRunner();

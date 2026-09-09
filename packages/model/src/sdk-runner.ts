@@ -102,6 +102,12 @@ export class SdkRunner implements AgentRunner {
             let outTok = 0;
             let receivedUsage = false;
             try {
+              input.onEvent({
+                type: "action_summary",
+                summary: "Requesting the next model response",
+                ...eventContext(input),
+              });
+              budget.assertActive();
               const result = await withCancellation(doGenerate(), budget.signal);
               const reportedInput = result.usage.inputTokens;
               const reportedOutput = result.usage.outputTokens;

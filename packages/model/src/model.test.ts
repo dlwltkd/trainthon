@@ -122,6 +122,31 @@ describe("RunBudget", () => {
 });
 
 describe("SdkRunner", () => {
+  it("announces a model request before entering the provider transport", async () => {
+    const run = input();
+    const model = new MockLanguageModelV2({ doGenerate: async () => {
+      expect(run.events.at(-1)).toMatchObject({
+        type: "action_summary", summary: "Requesting the next model response", agentRole: "blue", stage: "PATCH",
+      });
+      expect(run.events.some(event => event.type === "model_msg")).toBe(false);
+      return reply();
+    } });
+    await new SdkRunner(() => model).run(run);
+    expect(run.events.filter(event => event.type === "model_msg")).toHaveLength(1);
+  });
+
+  it("honors cancellation from the request progress observer before calling the provider", async () => {
+    const controller = new AbortController();
+    const run = input(budget({}, controller.signal));
+    const model = new MockLanguageModelV2({ doGenerate: reply() });
+    run.onEvent = event => {
+      run.events.push(event);
+      if (event.type === "action_summary") controller.abort();
+    };
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow(RunCancelledError);
+    expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
   it("caps each request, correlates tool events, and accounts across roles", async () => {
     const model = new MockLanguageModelV2({ doGenerate: [toolReply(), reply()] });
     const run = input();
