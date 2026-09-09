@@ -86,6 +86,7 @@ describe("prompt-driven source review", () => {
     const f = fixture();
     const runner = (role: "red" | "blue") => ({ run: async (input: Parameters<ScriptedRunner["run"]>[0]) => {
       expect(input.prompt).toContain(JSON.stringify(original));
+      expect(input.initialSourceFiles).toEqual(["src/add.ts"]);
       expect(input.prompt).not.toContain("TEST_PLACEHOLDER");
       return new ScriptedRunner(async tools => {
         await tools.use_skill!({ skillId: "source-security-review", reason: "Inspect the source supplied in context." });

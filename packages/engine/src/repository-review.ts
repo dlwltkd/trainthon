@@ -119,7 +119,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
       const context = tools.sourceContext(options.prompt, SOURCE_CONTEXT_POLICY.maxBytes, SOURCE_CONTEXT_POLICY.maxFiles);
       writeJson(join(dir, `source-context-${role}.json`), { policy: SOURCE_CONTEXT_POLICY, files: context.files });
       if (context.files.length) logger.emit({ type: "action_summary", agentRole: role, stage, summary: `Harness supplied complete source for ${context.files.length} file(s) (${context.files.reduce((sum, file) => sum + file.bytes, 0).toLocaleString("en-US")} bytes) in the initial context: ${context.files.map(file => file.path).join(", ")}.` });
-      return context.text;
+      return context;
     };
     let handoff = "";
     if (options.reviewModel && reviewer) {
@@ -131,7 +131,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
       status = "INFRA_ERROR"; invoked = true;
       try {
         const reviewed = await reviewer.run({
-          system: systemPromptRepositoryReview("red"), prompt: prompt + reviewContext, tools: reviewToolset.tools,
+          system: systemPromptRepositoryReview("red"), prompt: prompt + reviewContext.text, initialSourceFiles: reviewContext.files.map(file => file.path), tools: reviewToolset.tools,
           budgets: options.budgets, budget, model: options.reviewModel.model, seed: options.seed, role: "red", stage, requestPolicy: REQUEST_POLICY,
           onEvent: emitAgentEvent,
         });
@@ -166,7 +166,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     budget.check(); invoked = true;
     const result = await runner.run({
       system: options.remediate ? systemPromptRepositoryRepair() : systemPromptRepositoryReview(),
-      prompt: prompt + repairContext + handoff,
+      prompt: prompt + repairContext.text + handoff, initialSourceFiles: repairContext.files.map(file => file.path),
       tools: toolset.tools, budgets: options.budgets, budget, model: options.model.model, seed: options.seed, role: "blue", stage, requestPolicy: REQUEST_POLICY,
       onEvent: emitAgentEvent,
     });

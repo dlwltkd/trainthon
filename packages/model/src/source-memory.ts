@@ -19,7 +19,9 @@ export class SourceMemory {
   private skill?: Data;
   private inspectedDiff?: Data;
 
-  constructor(private readonly thresholdBytes: number) {}
+  constructor(private readonly thresholdBytes: number, initialSourceFiles: readonly string[] = []) {
+    for (const path of initialSourceFiles) this.observed.add(path);
+  }
 
   record(name: string, input: unknown, output: unknown): void {
     const args = object(input);

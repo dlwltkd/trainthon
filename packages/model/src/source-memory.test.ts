@@ -23,6 +23,17 @@ function checkpoint(memory: SourceMemory, messages: ModelMessage[]) {
 }
 
 describe("SourceMemory", () => {
+  it("retains supplied source paths through compaction without treating unread paths as observed", () => {
+    const memory = new SourceMemory(8_000, ["initial.py"]);
+    const messages = history();
+    messages[0] = { role: "user", content: "Complete initial.py source: def identity(value): return value" };
+    memory.record("list_dir", {}, { entries: ["unread.py"] });
+    memory.record("report_progress", { summary: "Continue from the supplied source.", evidence: ["initial.py"] }, {});
+    expect(memory.compact(messages)).toBeDefined();
+    expect(memory.messages(messages)[0]).toBe(messages[0]);
+    expect(checkpoint(memory, messages).observedFiles).toEqual(["initial.py"]);
+  });
+
   it("keeps the original task and complete latest tool exchange without old source or reasoning", () => {
     const memory = new SourceMemory(8_000);
     const messages = history();

@@ -104,7 +104,7 @@ export class SdkRunner implements AgentRunner {
       if (policy && (!Number.isSafeInteger(policy.maxRetries) || policy.maxRetries < 0 || policy.maxRetries > 3 || !Number.isSafeInteger(policy.timeoutMs) || policy.timeoutMs <= 0 || policy.transport !== undefined && !["stream", "generate"].includes(policy.transport))) throw new Error("requestPolicy requires 0–3 retries, a positive timeout, and a supported transport");
       if (policy?.progressEverySteps !== undefined && (!Number.isSafeInteger(policy.progressEverySteps) || policy.progressEverySteps < 1 || policy.progressEverySteps > 20)) throw new Error("progressEverySteps must be an integer from 1 to 20");
       if (policy?.contextCheckpointBytes !== undefined && (!Number.isSafeInteger(policy.contextCheckpointBytes) || policy.contextCheckpointBytes < 8_000 || policy.contextCheckpointBytes > 1_000_000)) throw new Error("contextCheckpointBytes must be an integer from 8000 to 1000000");
-      const memory = policy?.contextCheckpointBytes ? new SourceMemory(policy.contextCheckpointBytes) : undefined;
+      const memory = policy?.contextCheckpointBytes ? new SourceMemory(policy.contextCheckpointBytes, input.initialSourceFiles) : undefined;
       const resolved = this.resolve(input.model);
       if (typeof resolved === "string") throw new Error("ModelResolver must return an explicit provider model");
       const model = wrapLanguageModel({

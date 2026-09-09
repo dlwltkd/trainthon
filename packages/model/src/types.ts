@@ -13,6 +13,8 @@ export interface AgentTool<A = unknown, R = unknown> {
 export interface AgentRunInput {
   system: string;
   prompt: string;
+  /** Trusted harness paths whose complete source text is already in the prompt. */
+  initialSourceFiles?: readonly string[];
   tools: AgentTool[];
   budgets: Budgets;
   model: string;
