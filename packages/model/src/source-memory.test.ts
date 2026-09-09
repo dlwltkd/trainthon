@@ -11,11 +11,13 @@ function history(): ModelMessage[] {
   return [task,
     { role: "assistant", content: [{ type: "reasoning", text: "private-test-placeholder" }, { type: "tool-call", toolCallId: "read", toolName: "read_file", input: { path: "src/add.ts" } }] },
     exchange("read", "read_file", "old-source-page".repeat(1000))[1]!,
+    ...exchange("recent-read", "read_file", "recent-source-page"),
+    ...exchange("recent-search", "grep", "recent-source-match"),
     ...exchange("progress", "report_progress", "Recorded the latest public plan."),
   ];
 }
 function checkpoint(memory: SourceMemory, messages: ModelMessage[]) {
-  const message = memory.messages(messages)[1]!;
+  const message = memory.messages(messages).find(message => message.role === "user" && typeof message.content === "string" && message.content.startsWith("Harness context checkpoint."))!;
   expect(message.role).toBe("user");
   return JSON.parse((message.content as string).split("\n").at(-1)!);
 }
@@ -31,7 +33,8 @@ describe("SourceMemory", () => {
     expect(event.bytesAfter).toBeLessThan(event.bytesBefore);
     const compacted = memory.messages(messages);
     expect(compacted[0]).toBe(task);
-    expect(compacted.slice(2)).toEqual(messages.slice(3));
+    expect(compacted.slice(-2)).toEqual(messages.slice(-2));
+    expect(compacted.slice(1, 5)).toEqual(messages.slice(3, 7));
     expect(JSON.stringify(compacted)).not.toMatch(/old-source-page|private-test-placeholder/);
     expect(checkpoint(memory, messages)).toMatchObject({ observedFiles: ["src/add.ts"], latestProgress: { nextAction: "Check the declared contract." } });
 
@@ -78,5 +81,22 @@ describe("SourceMemory", () => {
     expect(memory.compact(messages)).toBeUndefined();
     expect(memory.needsCheckpoint(messages)).toBe(false);
     expect(memory.messages(messages)).toBe(messages);
+  });
+
+  it("retains a large latest source exchange without splitting its call/result pairs", () => {
+    const memory = new SourceMemory(8_000);
+    memory.record("report_progress", { summary: "Continue with the latest source." }, {});
+    const messages = [task,
+      ...exchange("old-source", "read_file", "discard-older-source".repeat(1000)),
+      ...exchange("latest-source", "read_file", "retain-latest-source".repeat(2000)),
+      ...exchange("progress", "report_progress", "Recorded"),
+    ];
+    expect(memory.compact(messages)).toBeDefined();
+    const compacted = memory.messages(messages);
+    expect(JSON.stringify(compacted)).not.toContain("discard-older-source");
+    expect(compacted.slice(1, 3)).toEqual(messages.slice(3, 5));
+    const calls = compacted.flatMap(message => message.role === "assistant" && Array.isArray(message.content) ? message.content.filter(part => part.type === "tool-call").map(part => part.toolCallId) : []);
+    const results = compacted.flatMap(message => message.role === "tool" ? message.content.filter(part => part.type === "tool-result").map(part => part.toolCallId) : []);
+    expect(calls).toEqual(results);
   });
 });

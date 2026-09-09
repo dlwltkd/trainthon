@@ -202,8 +202,10 @@ the investigation tools. This checkpoint does not end Red's investigation.
 After 64 KB of new conversation history, prompt reviews request a fresh public
 progress update and compact older messages into a checkpoint. The original task,
 active skill, observed file paths, findings, Blue assessments, edit records, and
-latest plan remain available, along with the latest complete tool exchange.
-Older source pages must be reread when their details are needed. Checkpoint events
+latest plan remain available, along with the latest complete tool exchange and
+up to two recent source exchanges. The newest source exchange always remains
+intact; a second is retained when their combined size is at most 32 KB.
+Older source pages can be reread when an omitted detail is needed. Checkpoint events
 show the conversation's byte size before and after; this is not a token limit or
 a reduction of the provider's context window. Compaction and retry recovery apply
 within the current run, not across process restarts.
