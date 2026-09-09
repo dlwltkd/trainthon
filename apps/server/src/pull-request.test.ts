@@ -77,6 +77,14 @@ function github(options: { push?: boolean; moved?: boolean; baselineHash?: strin
 }
 
 describe("draft pull request delivery", () => {
+  it("rejects historical partial reviews before any GitHub request", async () => {
+    const f = fixture();
+    writeFileSync(join(f.runDir, "record.json"), JSON.stringify({ ...f.record, reviewStatus: "partial" }));
+    const api = github();
+    await expect(createDraftPullRequest(f.record, { runsDir: f.runsDir, token: "test-token", fetch: api.transport })).rejects.toThrow("complete Red review");
+    expect(api.calls).toEqual([]);
+  });
+
   it("creates only a dedicated branch and explicit untested draft from verified candidate bytes", async () => {
     const f = fixture();
     const api = github();

@@ -179,7 +179,7 @@ describe("prompt-driven source review", () => {
         }).run(input);
       } },
     });
-    expect(record.status).toBe(blueReadsSource ? "REVIEW_COMPLETE" : "INCOMPLETE_REVIEW");
+    expect(record.status).toBe("INCOMPLETE_REVIEW");
     expect(record.reviewStatus).toBe("partial");
     expect(record.reviewSummary).toBe("");
     expect(readFileSync(record.artifacts.redReviewSummary!, "utf8")).toBe("");
@@ -229,7 +229,10 @@ describe("prompt-driven source review", () => {
         }).run(input);
       } },
     });
-    expect(record.status, record.reason).toBe("PATCH_PROPOSED");
+    expect(record.status, record.reason).toBe("INCOMPLETE_REVIEW");
+    expect(record.reason).toContain("Red did not complete");
+    expect(record).not.toHaveProperty("delivery");
+    expect(readFileSync(record.artifacts.patch, "utf8")).toContain("+export");
     expect(record.reviewStatus).toBe("partial");
     expect(record.reviewSummary).toBe("");
     expect(record.reviewFailure).toBe(failure.message);

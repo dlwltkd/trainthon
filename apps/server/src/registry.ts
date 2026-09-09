@@ -1,6 +1,7 @@
 import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync, writeFileSync, constants } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { HarnessEvent, RunEndEvent, RunStartEvent, RunStatus } from "@vouch/protocol";
+import { sourceReviewOutcome } from "@vouch/protocol";
 import { safePath } from "../../../packages/sandbox/src/fs-tools.js";
 
 export const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
@@ -239,11 +240,12 @@ function summarize(stored: StoredRun): RunSummary | null {
   if (!start) return null;
   const end = events.find((e): e is RunEndEvent => e.type === "run_end");
   const snapshot = events.find(e => e.type === "repository_snapshot");
+  const reviewStatus = stored.record && typeof stored.record === "object" && "reviewStatus" in stored.record ? stored.record.reviewStatus : undefined;
   return {
     runId,
     kind: start.runKind ?? (start.taskId ? "benchmark" : "local_repository"),
     workflow: start.workflow,
-    status: end?.status ?? "RUNNING",
+    status: sourceReviewOutcome(end?.status ?? "RUNNING", reviewStatus).status,
     mode: start.mode, model: start.model, condition: start.condition, taskId: start.taskId,
     repository: snapshot?.type === "repository_snapshot" ? snapshot.name : start.repository?.name,
     startedAt: start.ts, endedAt: end?.ts, elapsedMs: end?.elapsedMs, eventCount: events.length,

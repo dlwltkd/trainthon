@@ -10,6 +10,16 @@ function trace(...payloads: Payload[]): HarnessEvent[] {
 }
 
 describe("agent activity derivation", () => {
+  it("shows historical partial reviews as incomplete without changing the stored trace or leaking the ending into replay", () => {
+    const events = trace({ type: "run_end", status: "PATCH_PROPOSED", reason: "Old success", costUsd: null, elapsedMs: 1000 });
+    expect(deriveRun(events.slice(0, 1), undefined, "partial")!.status).toBe("RUNNING");
+    const view = deriveRun(events, undefined, "partial")!;
+    expect(view.status).toBe("INCOMPLETE_REVIEW");
+    expect(view.reason).toContain("Red did not complete");
+    expect(view.activity.at(-1)).toMatchObject({ status: "INCOMPLETE_REVIEW" });
+    expect(events.at(-1)).toMatchObject({ status: "PATCH_PROPOSED", reason: "Old success" });
+  });
+
   it("marks conservative token accounting only after its visible event and keeps uncertainty sticky", () => {
     const events = trace(
       { type: "budget_update", tokens: 1234, usageKnown: true, steps: 1, elapsedMs: 1000 },

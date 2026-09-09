@@ -59,6 +59,14 @@ export type RunStatus =
   | "INVALID_REPRODUCTION"
   | "INFRA_ERROR";
 
+/** Also applies to older run records that counted a partial Red review as success. */
+export function sourceReviewOutcome(status: RunStatus, reviewStatus: unknown, reason?: string): { status: RunStatus; reason?: string } {
+  if (reviewStatus === "partial" && (status === "REVIEW_COMPLETE" || status === "PATCH_PROPOSED")) {
+    return { status: "INCOMPLETE_REVIEW", reason: "Red did not complete its source review. Blue's observations and any candidate patch are preserved; the full review is incomplete." };
+  }
+  return { status, reason };
+}
+
 export type EngineState =
   | "INIT"
   | "CONTEXT"

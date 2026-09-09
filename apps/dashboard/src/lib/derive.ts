@@ -9,6 +9,7 @@ import type {
   RunStatus,
   TestRunEvent,
 } from "@vouch/protocol";
+import { sourceReviewOutcome } from "@vouch/protocol";
 import { parseUnifiedDiff, type DiffFile } from "./diff";
 import { basename } from "./format";
 
@@ -383,7 +384,7 @@ function countPatch(patch: string): { additions: number; deletions: number } {
   return { additions, deletions };
 }
 
-export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean): RunView | null {
+export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, finalReviewStatus?: unknown): RunView | null {
   if (events.length === 0) return null;
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
   const start = sorted.find((e) => e.type === "run_start");
@@ -645,8 +646,9 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean): Ru
         break;
       }
       case "run_end": {
-        view.status = event.status;
-        view.reason = event.reason;
+        const outcome = sourceReviewOutcome(event.status, finalReviewStatus, event.reason);
+        view.status = outcome.status;
+        view.reason = outcome.reason;
         view.endedAt = event.ts;
         view.elapsedMs = event.elapsedMs;
         view.costUsd = event.costUsd;
@@ -655,8 +657,8 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean): Ru
           id: `end-${event.seq}`,
           seq: event.seq,
           ts: event.ts,
-          status: event.status,
-          reason: event.reason,
+          status: outcome.status,
+          reason: outcome.reason,
           elapsedMs: event.elapsedMs,
           costUsd: event.costUsd,
         });

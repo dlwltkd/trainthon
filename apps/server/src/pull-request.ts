@@ -53,6 +53,7 @@ function loadDelivery(value: unknown, runsDir: string): Delivery {
   const runDir = safePath(runsDir, input.runId);
   const record = readJson(runDir, "record.json");
   if (record.runId !== input.runId || record.provisional === true) throw new Error("the run has no final delivery record");
+  if (record.reviewStatus === "partial") throw new Error("draft delivery requires a complete Red review");
   if (record.status !== "TESTS_PASSED" && record.status !== "PATCH_PROPOSED") throw new Error("draft delivery requires TESTS_PASSED or PATCH_PROPOSED");
   const repo = object(record.repository, "repository metadata");
   if (typeof repo.url !== "string" || typeof repo.commit !== "string" || !SHA.test(repo.commit)) throw new Error("delivery requires a public GitHub URL and full recorded commit");

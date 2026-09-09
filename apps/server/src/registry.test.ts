@@ -23,6 +23,15 @@ function event(seq: number, type: string): HarnessEvent {
 }
 
 describe("run registry", () => {
+  it("lists historical partial source reviews as incomplete while preserving the raw record", () => {
+    const { root, dir, path } = fixture();
+    appendFileSync(path, JSON.stringify({ ...event(1, "run_end"), status: "REVIEW_COMPLETE" }) + "\n");
+    writeFileSync(join(dir, "record.json"), JSON.stringify({ status: "REVIEW_COMPLETE", reviewStatus: "partial" }));
+    const registry = new RunRegistry(root);
+    expect(registry.list()[0]?.status).toBe("INCOMPLETE_REVIEW");
+    expect(registry.load("run-1")?.record).toMatchObject({ status: "REVIEW_COMPLETE" });
+  });
+
   it("distinguishes observed CLI activity from controllable runs and closes stale observations", () => {
     const { root, path } = fixture();
     const now = Date.now();

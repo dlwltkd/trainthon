@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import type { Budgets, EngineState, EventInput, FindingReportedEvent, HarnessEvent, RunStatus } from "@vouch/protocol";
+import { sourceReviewOutcome } from "@vouch/protocol";
 import { prepareRepositorySnapshot, prepareSourceWorkspace, captureLocalChanges, type LocalWorkspace, type RepositorySnapshot } from "@vouch/sandbox";
 import { BudgetExceededError, ProviderRequestError, RunBudget, RunCancelledError, canonicalizeModelSpec, requireRunnerForSpec, validateModelSpec, type AgentRunner, type ModelSpec } from "@vouch/model";
 import { REPOSITORY_REVIEW_GUIDANCE, SOURCE_REPAIR_GUIDANCE, systemPromptRepositoryReview, systemPromptRepositoryRepair } from "@vouch/skills";
@@ -155,6 +156,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     const sourceEvidence = logger.getEvents().some(event => event.type === "agent_update" && event.agentRole === "blue" && event.evidence.length > 0);
     status = summary && sourceEvidence ? "REVIEW_COMPLETE" : "INCOMPLETE_REVIEW";
     reason = status === "REVIEW_COMPLETE" ? "Source review completed; findings are source observations, not runtime security verification." : "The agent did not produce a final review with observed source evidence.";
+    ({ status, reason } = sourceReviewOutcome(status, reviewStatus, reason));
     if (options.remediate) {
       const diff = await captureLocalChanges(workspace as LocalWorkspace);
       protectedFilesUnchanged = true;
