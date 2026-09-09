@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ScriptedRunner, type ScriptToolMap, type RunBudget } from "@vouch/model";
+import { ProviderRequestError, ScriptedRunner, type ScriptToolMap, type RunBudget } from "@vouch/model";
 import type { HarnessEvent } from "@vouch/protocol";
 import { executeRepositoryReview, type ExecuteRepositoryReviewOptions } from "./repository-review.js";
 
@@ -204,6 +204,73 @@ describe("prompt-driven source review", () => {
     });
     expect(record.status).toBe("INCOMPLETE_REVIEW");
     expect(record).not.toHaveProperty("delivery");
+    assertFinal(record, f);
+  });
+
+  it("preserves observed Red evidence after exhausted transient retries while requiring Blue's own validation", async () => {
+    const f = fixture();
+    const failure = new ProviderRequestError("Model API request failed (HTTP 502).", true);
+    const record = await executeRepositoryReview({
+      ...f.options, remediate: true, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { await startReview(tools); await tools.report_finding!(finding); throw failure; }),
+      runner: { run: async input => {
+        expect(input.prompt).toContain('"reviewStatus": "partial"');
+        expect(input.prompt).toContain("failed after retries");
+        expect(input.prompt).toContain("HTTP 502");
+        return new ScriptedRunner(async tools => {
+          await tools.use_skill!({ skillId: "source-security-review", reason: "Independently assess the partial handoff." });
+          await tools.report_progress!(progress());
+          await tools.use_skill!({ skillId: "source-remediation", reason: "Check the partial handoff." });
+          await expect(tools.write_file!({ path: "src/add.ts", content: corrected })).rejects.toThrow("confirmed source-backed finding");
+          await startReview(tools);
+          await edit(tools);
+          await inspect(tools);
+          return "Blue independently confirmed the observed arithmetic mismatch and inspected the correction. Tests were not run.";
+        }).run(input);
+      } },
+    });
+    expect(record.status, record.reason).toBe("PATCH_PROPOSED");
+    expect(record.reviewStatus).toBe("partial");
+    expect(record.reviewSummary).toBe("");
+    expect(record.reviewFailure).toBe(failure.message);
+    expect(record.findings.map(item => item.agentRole)).toEqual(["red", "blue"]);
+    expect(JSON.parse(readFileSync(record.artifacts.redReviewHandoff!, "utf8"))).toMatchObject({ reviewStatus: "partial", summary: "", providerError: failure.message, sourceEvidenceObserved: true, observedFiles: ["src/add.ts"], findings: [expect.objectContaining({ findingId: "addition" })] });
+    expect(f.events.filter(event => event.type === "agent_summary" && event.agentRole === "red")).toEqual([]);
+    expect(f.events).toContainEqual(expect.objectContaining({ type: "action_summary", summary: expect.stringContaining("failed after retries") }));
+    assertFinal(record, f);
+  });
+
+  it.each([
+    { observed: false, error: new ProviderRequestError("HTTP 502", true) },
+    { observed: true, error: new ProviderRequestError("HTTP 401", false) },
+    { observed: true, error: new Error("Local tool failure") },
+  ])("stops on Red failure without usable source or a transient transport classification: $observed / $error.message", async ({ observed, error }) => {
+    const f = fixture();
+    let blueInvoked = false;
+    const record = await executeRepositoryReview({
+      ...f.options, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { if (observed) await startReview(tools); throw error; }),
+      runner: new ScriptedRunner(async () => { blueInvoked = true; return "Unexpected"; }),
+    });
+    expect(record.status).toBe("INFRA_ERROR");
+    expect(record.reason).toBe(error.message);
+    expect(blueInvoked).toBe(false);
+    expect(record).not.toHaveProperty("reviewStatus");
+    assertFinal(record, f);
+  });
+
+  it("does not bypass the shared step limit with a partial handoff after a Red API failure", async () => {
+    const f = fixture();
+    let blueInvoked = false;
+    const record = await executeRepositoryReview({
+      ...f.options, budgets: { ...f.options.budgets, maxSteps: 1 }, reviewModel,
+      reviewRunner: new ScriptedRunner(async tools => { await startReview(tools); throw new ProviderRequestError("HTTP 502", true); }),
+      runner: new ScriptedRunner(async () => { blueInvoked = true; return "Unexpected"; }),
+    });
+    expect(record.status).toBe("BUDGET_TIMEOUT");
+    expect(record.reviewStatus).toBe("partial");
+    expect(record.reason).toContain("steps");
+    expect(blueInvoked).toBe(false);
     assertFinal(record, f);
   });
 

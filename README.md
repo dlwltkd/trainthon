@@ -194,6 +194,11 @@ review. The timeline shows the HTTP status or timeout and the retry delay.
 seconds. Cancellation and the run deadline interrupt that wait. Failed attempts
 without usage are conservatively accounted and marked unknown. Repeated empty
 Red replies produce an explicitly partial handoff only when source was observed.
+If Red's transient API errors persist after retries, the harness retains its
+observed source and recorded findings in a partial handoff, with the provider
+failure attached. Blue must independently validate that source before proposing
+changes. Authentication errors, cancellation, and exhausted run limits still stop
+the run.
 
 To repair against an existing regression, provide `--regression`. Both `--report`
 and a supplemental `--prompt` are optional; `--fix` cannot be combined with this

@@ -36,3 +36,4 @@ export type {
 export { computeCost, estimateCost, DEFAULT_PRICING } from "./pricing.js";
 export type { Pricing } from "./pricing.js";
 export { RunBudget, BudgetExceededError, RunCancelledError } from "./budget.js";
+export { ProviderRequestError } from "./provider-errors.js";
