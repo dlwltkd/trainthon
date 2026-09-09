@@ -3,6 +3,7 @@ import { ArrowUpRight, Plus, RefreshCw } from "lucide-react";
 import { api, type RunSummary } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDuration, relativeTime } from "@/lib/format";
+import { repositoryWorkflowLabel } from "@/lib/derive";
 import { routeHref } from "@/hooks/useHashRoute";
 import { Button, Chip, Empty, Mono, Panel, Spinner, StatusChip } from "./ui";
 
@@ -36,7 +37,7 @@ export function RunsHome({ onNewRun }: { onNewRun: () => void }) {
         <div>
           <h1 className="text-[1.6em] font-semibold tracking-tight">Security agent workspace</h1>
           <p className="mt-1 max-w-xl text-ink-2">
-            A shared framework for security workflows. Follow plans, skill calls, decisions, tools, and evidence in one trace. Repository repair is the first implemented workflow.
+            A shared framework for security workflows. Start with a repository and a prompt. Follow findings, skills, and proposed fixes, then review the patch before creating a draft PR.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -72,7 +73,7 @@ export function RunsHome({ onNewRun }: { onNewRun: () => void }) {
       {runs !== null && (
         <Section title="Recent" count={recent.length}>
           {recent.length === 0 ? (
-            <Empty title="No recorded runs yet" hint="Start the repository repair workflow with a local repository, an existing report, and a regression test." action={<Button onClick={onNewRun}>New run</Button>} />
+            <Empty title="No recorded runs yet" hint="Start a review with a public GitHub URL or local repository and a prompt. You can add a security report as context." action={<Button onClick={onNewRun}>New run</Button>} />
           ) : (
             recent.map((run) => <RunRow key={run.runId} run={run} />)
           )}
@@ -102,7 +103,7 @@ function RunRow({ run }: { run: RunSummary }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium tracking-tight">{title}</span>
           <StatusChip status={run.status} />
-          <Chip tone="neutral">{run.kind === "benchmark" ? `bench · ${run.condition ?? "?"}` : "Repository repair"}</Chip>
+          <Chip tone="neutral">{run.kind === "benchmark" ? `bench · ${run.condition ?? "?"}` : repositoryWorkflowLabel(run)}</Chip>
           {run.mode && <Chip tone={run.mode === "live" ? "fail" : "neutral"}>{run.mode}</Chip>}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.85em] text-ink-3">

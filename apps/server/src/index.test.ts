@@ -1,9 +1,12 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessEvent } from "@vouch/protocol";
 import { createApp } from "./index.js";
+
+const delivery = vi.hoisted(() => ({ createDraftPullRequest: vi.fn() }));
+vi.mock("./pull-request.js", () => delivery);
 
 vi.mock("node:child_process", async importOriginal => ({
   ...await importOriginal<typeof import("node:child_process")>(),
@@ -11,7 +14,7 @@ vi.mock("node:child_process", async importOriginal => ({
 }));
 
 const roots: string[] = [];
-afterEach(() => { vi.clearAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "vouch-server-"));
@@ -94,5 +97,84 @@ describe("local observer HTTP API", () => {
     expect((await request("/api/runs/run-1/artifact?name=report.txt")).status).toBe(404);
     expect((await request("/api/runs/run-1/artifact?name=record.json")).status).toBe(200);
     expect((await request("/api/runs/run-1/cancel", { method: "POST" })).status).toBe(409);
+  });
+
+  it("previews the durable public source snapshot after clone cleanup and retains review metadata", async () => {
+    const { request, dir, repo } = fixture();
+    const url = "https://github.com/example/project";
+    const commit = "b".repeat(40);
+    const events = [
+      { type: "run_start", runKind: "local_repository", workflow: "repository_review", model: "gpt-review-fixture", mode: "live", repository: { name: "example/project", commit, ref: "HEAD" } },
+      { type: "repository_snapshot", name: "example/project", url, commit, files: ["src/index.ts", "src/link.ts", ".env", "secrets.json"] },
+      { type: "run_end", status: "REVIEW_COMPLETE", elapsedMs: 100 },
+    ].map((event, seq) => ({ ...event, seq, ts: 100 + seq, runId: "run-1" }));
+    writeFileSync(join(dir, "events.jsonl"), events.map(event => JSON.stringify(event)).join("\n") + "\n");
+    writeFileSync(join(dir, "repository.json"), JSON.stringify({ url, sourcePath: repo, sourceSnapshot: "source" }));
+    writeFileSync(join(dir, "record.json"), JSON.stringify({ workflow: "repository_review", verification: { scope: "source_review", independentGrader: false } }));
+    writeFileSync(join(dir, "prompt.txt"), "Review source access boundaries.");
+    rmSync(join(dir, "regression.ts"));
+    mkdirSync(join(dir, "source", "src"), { recursive: true });
+    writeFileSync(join(dir, "source", "src", "index.ts"), "export const fromSnapshot = true;\n");
+    writeFileSync(join(dir, "source", "src", "unlisted.ts"), "not part of the recorded source inventory");
+    writeFileSync(join(dir, "source", ".env"), "fixture-only");
+    writeFileSync(join(dir, "source", "secrets.json"), "{}");
+    symlinkSync(join(dir, "prompt.txt"), join(dir, "source", "src", "link.ts"));
+    rmSync(repo, { recursive: true });
+
+    const detail = await (await request("/api/runs/run-1")).json();
+    expect(detail).toMatchObject({
+      observation: "completed", active: false,
+      source: {
+        workflow: "repository_review", url, name: "example/project", commit,
+        prompt: "Review source access boundaries.", filesAvailable: true,
+        files: ["src/index.ts", "src/link.ts"], artifactsAvailable: true,
+      },
+    });
+    expect(detail).not.toHaveProperty("source.regressionPath");
+    expect(detail).not.toHaveProperty("source.regression");
+    const preview = await request("/api/runs/run-1/file?path=src%2Findex.ts&repoPath=%2Funrelated-source");
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toEqual({ path: "src/index.ts", text: "export const fromSnapshot = true;\n", revision: commit });
+    for (const path of ["src/unlisted.ts", "src/link.ts", ".env", "secrets.json", "../record.json", "/tmp/other.ts", "src\\index.ts", "src//index.ts"]) {
+      expect((await request(`/api/runs/run-1/file?path=${encodeURIComponent(path)}`)).status).toBe(404);
+    }
+    const { execFileSync } = await import("node:child_process");
+    expect(execFileSync).not.toHaveBeenCalled();
+    const prompt = await (await request("/api/runs/run-1/artifact?name=prompt.txt")).json();
+    expect(prompt).toMatchObject({ name: "prompt.txt", text: "Review source access boundaries." });
+  });
+
+  it("reports GitHub token presence without returning token values", async () => {
+    const { request } = fixture();
+    vi.stubEnv("GITHUB_TOKEN", "fixture-github-token");
+    vi.stubEnv("GH_TOKEN", "");
+    const configured = await (await request("/api/health")).text();
+    expect(JSON.parse(configured)).toMatchObject({ github: { configured: true } });
+    expect(configured).not.toContain("fixture-github-token");
+    vi.stubEnv("GITHUB_TOKEN", "");
+    vi.stubEnv("GH_TOKEN", "fixture-fallback-token");
+    const fallback = await (await request("/api/health")).text();
+    expect(JSON.parse(fallback)).toMatchObject({ github: { configured: true } });
+    expect(fallback).not.toContain("fixture-fallback-token");
+    vi.stubEnv("GH_TOKEN", "");
+    expect(await (await request("/api/health")).json()).toMatchObject({ github: { configured: false } });
+  });
+
+  it("requires a completed recorded run before calling draft delivery", async () => {
+    const { request, dir, root } = fixture();
+    const events = readFileSync(join(dir, "events.jsonl"), "utf8").trim().split("\n");
+    writeFileSync(join(dir, "events.jsonl"), events.slice(0, 2).join("\n") + "\n");
+    expect((await request("/api/runs/run-1/pull-request", { method: "POST" })).status).toBe(409);
+    expect((await request("/api/runs/missing/pull-request", { method: "POST" })).status).toBe(409);
+    expect(delivery.createDraftPullRequest).not.toHaveBeenCalled();
+
+    writeFileSync(join(dir, "events.jsonl"), events.join("\n") + "\n");
+    const record = { runId: "run-1", status: "PATCH_PROPOSED", workflow: "repository_remediation", verification: { scope: "source_patch", testsRun: false } };
+    writeFileSync(join(dir, "record.json"), JSON.stringify(record));
+    delivery.createDraftPullRequest.mockResolvedValue({ url: "https://github.com/example/project/pull/7", number: 7, branch: "vouch/run-1" });
+    const response = await request("/api/runs/run-1/pull-request", { method: "POST" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ url: "https://github.com/example/project/pull/7", number: 7 });
+    expect(delivery.createDraftPullRequest).toHaveBeenCalledExactlyOnceWith(record, { runsDir: join(root, "runs") });
   });
 });

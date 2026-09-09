@@ -15,6 +15,7 @@ import { resolveLiveRoleModels } from "../../cli/src/run-options.js";
 import { RUN_ID_PATTERN, RunRegistry, readBoundedText, resolveInside } from "./registry.js";
 import { readTaskFile, startRun, type StartRequest } from "./runner.js";
 import { observeRun } from "./stream.js";
+import { createDraftPullRequest } from "./pull-request.js";
 import { isHiddenPath } from "../../../packages/sandbox/src/fs-tools.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -106,6 +107,7 @@ export function createApp(options: AppOptions = {}) {
       runsDir: RUNS_DIR,
       activeRuns: registry.activeCount,
       live: liveConfiguration(),
+      github: { configured: Boolean(process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim()) },
     }),
   );
 
@@ -156,6 +158,7 @@ export function createApp(options: AppOptions = {}) {
 
     let files: string[] | undefined = snapshot?.files?.filter(path => typeof path === "string" && !isHiddenPath(path));
     let report: string | undefined;
+    let prompt: string | undefined;
     let regression: string | undefined;
     let regressionPath: string | undefined;
     let name = snapshot?.name ?? start?.repository?.name;
@@ -184,12 +187,14 @@ export function createApp(options: AppOptions = {}) {
       }
     }
     if (stored.dir) {
+      prompt = readBoundedText(stored.dir, "prompt.txt", MAX_FILE_BYTES) ?? undefined;
       report ??= readBoundedText(stored.dir, "report.txt", MAX_FILE_BYTES) ?? undefined;
       const record = stored.record as { repository?: { regressionPath?: string } } | null;
       regressionPath ??= record?.repository?.regressionPath;
       const regressionFile = readdirSync(stored.dir).find(f => /^regression\.[a-z0-9]+$/i.test(f));
       if (regressionFile) regression ??= readBoundedText(stored.dir, regressionFile, MAX_FILE_BYTES) ?? undefined;
       if (stored.sidecar.repoPath && existsSync(stored.sidecar.repoPath) && files?.length) filesAvailable = true;
+      if (resolveInside(stored.dir, "source") && existsSync(join(stored.dir, "source")) && files?.length) filesAvailable = true;
     }
 
     return c.json({
@@ -201,6 +206,9 @@ export function createApp(options: AppOptions = {}) {
       events: stored.events,
       record: stored.record,
       source: {
+        workflow: start?.workflow ?? (stored.record as { workflow?: string } | null)?.workflow,
+        url: snapshot?.url,
+        prompt,
         kind: taskId ? "benchmark" : "local_repository",
         name,
         taskId,
@@ -245,13 +253,20 @@ export function createApp(options: AppOptions = {}) {
     return c.json({ ok: true });
   });
 
+  app.post("/api/runs/:id/pull-request", async (c) => {
+    const stored = registry.load(c.req.param("id"));
+    if (!stored || stored.observation !== "completed" || !stored.record) return c.json({ error: "a completed patch run is required" }, 409);
+    try { return c.json(await createDraftPullRequest(stored.record, { runsDir: RUNS_DIR })); }
+    catch (error) { return c.json({ error: error instanceof Error ? error.message : "Draft PR creation failed" }, 400); }
+  });
+
   app.get("/api/runs/:id/artifact", (c) => {
     const id = c.req.param("id");
     const name = c.req.query("name");
     if (!RUN_ID_PATTERN.test(id) || !name) return c.json({ error: "bad request" }, 400);
     const dir = registry.runDir(id);
     if (!dir) return c.json({ error: "no artifact directory for this run" }, 404);
-    if (!/^(?:record\.json|events\.jsonl|patch\.diff|input-patch\.diff|report\.txt|repository\.json|regression\.[a-z0-9]+|(?:repair|review)-summary\.txt|tests\/[a-z0-9._-]+\.(?:json|txt))$/i.test(name)) {
+    if (!/^(?:record\.json|events\.jsonl|patch\.diff|input-patch\.diff|prompt\.txt|report\.txt|repository\.json|regression\.[a-z0-9]+|(?:repair|review)-summary\.txt|tests\/[a-z0-9._-]+\.(?:json|txt))$/i.test(name)) {
       return c.json({ error: "artifact not available" }, 404);
     }
     const text = readBoundedText(dir, name, MAX_FILE_BYTES);
@@ -283,6 +298,12 @@ export function createApp(options: AppOptions = {}) {
 
     const repoPath = stored.sidecar.repoPath;
     const commit = snapshot?.commit ?? start?.repository?.commit;
+    if (!snapshot?.files.includes(path)) return c.json({ error: "file not in repository snapshot" }, 404);
+    if (stored.dir && existsSync(join(stored.dir, "source"))) {
+      const text = readBoundedText(stored.dir, `source/${path}`, MAX_FILE_BYTES);
+      if (text === null) return c.json({ error: "file unavailable or exceeds preview limit" }, 404);
+      return c.json({ path, text, revision: commit });
+    }
     if (!repoPath || !existsSync(repoPath) || !commit || !/^[a-f0-9]{40,64}$/i.test(commit)) {
       return c.json({ error: "file contents are not available for this run (repository path unknown)" }, 404);
     }

@@ -90,4 +90,17 @@ describe("agent activity derivation", () => {
     ])))!;
     expect(groupActivity(view.activity).some((item) => item.kind === "group")).toBe(false);
   });
+
+  it("keeps finding updates in history and shows the latest record without inferring a fix", () => {
+    const finding: Payload = { type: "finding_reported", findingId: "input-check", title: "Input check needs review", severity: "medium", confidence: "potential", summary: "A source branch may accept an absent value.", recommendation: "Review the default handling.", evidence: ["src/parser.ts"], callId: "finding-call-1", agentRole: "blue", stage: "REVIEW" };
+    const events = trace(finding, { ...finding, confidence: "confirmed", callId: "finding-call-2", summary: "The inspected branch does not supply a default." });
+    expect(deriveRun(events.slice(0, 1))!.findings).toEqual([]);
+    expect(deriveRun(events.slice(0, 2))!.findings[0]!.confidence).toBe("potential");
+    const view = deriveRun(events)!;
+    expect(view.findings).toHaveLength(1);
+    expect(view.findings[0]!.confidence).toBe("confirmed");
+    expect(view.activity.filter((item) => item.kind === "finding")).toHaveLength(2);
+    expect(view.tests).toEqual([]);
+    expect(view.changedFiles.size).toBe(0);
+  });
 });

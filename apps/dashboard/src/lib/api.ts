@@ -9,6 +9,7 @@ export interface RunSummary {
   condition?: string;
   taskId?: string;
   repository?: string;
+  workflow?: "repository_review" | "repository_repair" | "repository_remediation";
   startedAt: number;
   endedAt?: number;
   elapsedMs?: number;
@@ -22,6 +23,9 @@ export interface RunSummary {
 export interface RunSource {
   kind: "benchmark" | "local_repository";
   name?: string;
+  url?: string;
+  workflow?: "repository_review" | "repository_repair" | "repository_remediation";
+  prompt?: string;
   taskId?: string;
   commit?: string;
   ref?: string;
@@ -58,6 +62,7 @@ export interface Health {
   ok: boolean;
   runsDir: string;
   activeRuns: number;
+  github?: { configured: boolean };
   live:
     | { blue: LiveModel; red: LiveModel }
     | { error: string };
@@ -76,7 +81,9 @@ export type StartRequest =
   | {
       kind: "repository";
       repoPath: string;
-      regressionPath: string;
+      workflow?: "review" | "repair" | "remediate";
+      prompt?: string;
+      regressionPath?: string;
       reportPath?: string;
       reportText?: string;
       ref?: string;
@@ -109,6 +116,7 @@ export const api = {
   tasks: () => request<BenchTask[]>("/api/bench/tasks"),
   start: (body: StartRequest) => request<{ runId: string }>("/api/runs", { method: "POST", body: JSON.stringify(body) }),
   cancel: (id: string) => request<{ ok: true }>(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+  pullRequest: (id: string) => request<{ url: string; number?: number }>(`/api/runs/${encodeURIComponent(id)}/pull-request`, { method: "POST", body: "{}" }),
   artifact: (id: string, name: string) => request<{ name: string; size: number; text: string }>(`/api/runs/${encodeURIComponent(id)}/artifact?name=${encodeURIComponent(name)}`),
   file: (id: string, path: string) => request<{ path: string; text: string; revision: string }>(`/api/runs/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`),
   streamUrl: (id: string, after?: number) => `/api/runs/${encodeURIComponent(id)}/stream${after !== undefined ? `?after=${after}` : ""}`,

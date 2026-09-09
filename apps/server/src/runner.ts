@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import { DEFAULT_BUDGETS, type Condition, type ExecutionMode, type HarnessEvent } from "@vouch/protocol";
-import { executeLocalRun, executeRun, loadTask } from "@vouch/engine";
+import { executeLocalRun, executeRepositoryReview, executeRun, loadTask } from "@vouch/engine";
 import { readBoundedRegularFile } from "@vouch/sandbox";
-import { resolveLiveRoleModels } from "../../cli/src/run-options.js";
+import { resolveLiveBlueModel, resolveLiveRoleModels } from "../../cli/src/run-options.js";
 import { readBoundedText, resolveInside, type ActiveRun, type RunRegistry } from "./registry.js";
 
 export interface BenchStartRequest {
@@ -15,7 +15,9 @@ export interface BenchStartRequest {
 export interface RepositoryStartRequest {
   kind: "repository";
   repoPath: string;
-  regressionPath: string;
+  workflow?: "review" | "repair" | "remediate";
+  prompt?: string;
+  regressionPath?: string;
   reportPath?: string;
   reportText?: string;
   ref?: string;
@@ -119,21 +121,31 @@ export async function startRun(
     return started;
   }
 
-  if (typeof request.repoPath !== "string" || !request.repoPath || typeof request.regressionPath !== "string" || !request.regressionPath) throw new Error("repoPath and regressionPath are required");
+  if (typeof request.repoPath !== "string" || !request.repoPath.trim()) throw new Error("repository path or public GitHub URL is required");
+  const workflow = request.workflow ?? (request.regressionPath ? "repair" : "review");
+  if (!["review", "repair", "remediate"].includes(workflow)) throw new Error("invalid repository workflow");
+  if (request.prompt !== undefined && (typeof request.prompt !== "string" || Buffer.byteLength(request.prompt) > 20_000)) throw new Error("prompt must be at most 20 KB");
   if (request.reportText !== undefined && (typeof request.reportText !== "string" || Buffer.byteLength(request.reportText) > 200_000)) throw new Error("reportText must be at most 200 KB");
   if (request.mode !== "live" && request.mode !== "scripted") throw new Error("mode must be live or scripted");
   if (request.mode === "scripted" && !request.patchPath) throw new Error("scripted repository runs require patchPath");
   if (request.mode === "live" && request.patchPath) throw new Error("patchPath is only supported in scripted mode");
 
-  const repoPath = resolve(request.repoPath);
+  const repoPath = request.repoPath;
   let report = request.reportText ?? "";
   if (!report.trim() && request.reportPath) {
     report = readBoundedRegularFile(resolve(request.reportPath), 200_000, "report").toString("utf8");
   }
-  if (!report.trim()) throw new Error("a non-empty report (reportText or reportPath) is required");
+  if (workflow !== "repair") {
+    if (request.mode !== "live" || request.patchPath || request.regressionPath) throw new Error("prompt-based workflows require live mode without a patch or regression");
+    if (!request.prompt?.trim()) throw new Error("a task prompt is required");
+    executeRepositoryReview({ repoPath, ref: request.ref, prompt: request.prompt, report, remediate: workflow === "remediate", model: resolveLiveBlueModel({}, process.env), runsDir: paths.runsDir, budgets: DEFAULT_BUDGETS, seed, signal: controller.signal, onEvent }).then(() => finish(), finish);
+    return started;
+  }
+  if (typeof request.regressionPath !== "string" || !request.regressionPath.trim()) throw new Error("regressionPath is required for repair with tests");
+  if (request.prompt?.trim()) report = `Task prompt:\n${request.prompt}\n\n${report}`;
 
   const liveModels = request.mode === "live" ? resolveLiveRoleModels({}, process.env) : undefined;
-  pending.sidecar.repoPath = repoPath;
+  if (!/^[a-z][a-z0-9+.-]*:|^git@|^github\.com\//i.test(repoPath)) pending.sidecar.repoPath = resolve(repoPath);
   executeLocalRun({
     repoPath,
     ref: request.ref ?? "HEAD",

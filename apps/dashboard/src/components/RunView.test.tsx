@@ -4,6 +4,8 @@ import type { HarnessEvent } from "@vouch/protocol";
 import type { RunController } from "../hooks/useRun";
 import { deriveRun } from "../lib/derive";
 import { RunView } from "./RunView";
+import { EvidencePanel } from "./EvidencePanel";
+import { RepoHeader } from "./RepoHeader";
 
 const state = vi.hoisted(() => ({ run: null as RunController | null }));
 vi.mock("@/hooks/useRun", () => ({ useRun: () => state.run }));
@@ -63,5 +65,62 @@ describe("run view agent trace integration", () => {
     expect(html).toContain("Following CLI events from disk");
     expect(html).not.toContain("Cancel run");
     expect(html).not.toContain("run ended without a final event");
+  });
+
+  it("renders completed source review findings without test or repair gates", () => {
+    const events = trace(
+      { type: "agent_summary", agentRole: "blue", stage: "REVIEW", summary: "The inspected authorization check verifies ownership before reading the record." },
+      { type: "run_end", status: "REVIEW_COMPLETE", costUsd: null, elapsedMs: 2000 },
+    );
+    const start = events[0]!;
+    if (start.type === "run_start") start.workflow = "repository_review";
+    const view = deriveRun(events)!;
+    state.run = controller(events);
+    const runHtml = renderToStaticMarkup(<RunView runId="run-1" />);
+    expect(runHtml).toContain("Repository review");
+    expect(runHtml).toContain("Review findings");
+    expect(runHtml).toContain("verifies ownership");
+    const evidence = renderToStaticMarkup(<EvidencePanel view={view} source={{ ...state.run.source!, prompt: "Review authorization." }} focusPhase={null} />);
+    expect(evidence).toContain("source review · model-reported findings");
+    expect(evidence).toContain("tests were not run");
+    expect(evidence).toContain("Task prompt");
+    expect(evidence).not.toContain("Before / after test evidence");
+    expect(evidence).not.toContain(">Gates<");
+    expect(evidence).not.toContain("Independent grade");
+  });
+
+  it("links only canonical GitHub origins and the exact recorded commit", () => {
+    const run = controller(trace());
+    const source = { ...run.source!, url: "https://github.com/example/repository", commit: "a".repeat(40) };
+    const render = (url: string) => renderToStaticMarkup(<RepoHeader view={run.view!} source={{ ...source, url }} now={1000} connection="recorded" playback="recorded" />);
+    expect(render(source.url)).toContain(`href="${source.url}/tree/${source.commit}"`);
+    expect(render("https://github.com.attacker.test/example/repository")).not.toContain('href="https://github.com.attacker.test');
+  });
+
+  it("renders structured source findings and marks a proposed patch as untested", () => {
+    const events = trace(
+      { type: "finding_reported", findingId: "default-value", title: "Default input needs review", severity: "medium", confidence: "potential", summary: "A missing input follows an unexpected branch.", recommendation: "Supply an explicit default value.", evidence: ["calc.py"], callId: "finding-1", agentRole: "blue", stage: "REVIEW" },
+      { type: "agent_summary", agentRole: "blue", stage: "PATCH", summary: "**Finding:** the proposed default is in `calc.py`." },
+      { type: "run_end", status: "PATCH_PROPOSED", costUsd: null, elapsedMs: 2000 },
+    );
+    const start = events[0]!;
+    if (start.type === "run_start") start.workflow = "repository_remediation";
+    state.run = controller(events);
+    const html = renderToStaticMarkup(<RunView runId="run-1" />);
+    expect(html).toContain("Review &amp; propose fix");
+    expect(html).toContain("Patch proposed · untested");
+    expect(html).toContain("Default input needs review");
+    expect(html).toContain("Potential");
+    expect(html).toContain("Recorded source evidence");
+    expect(html).toContain("Supply an explicit default value.");
+    expect(html).toContain("Findings &amp; patch");
+    expect(html).toContain("Source patch · untested");
+    expect(html).toContain(">Finding:</strong>");
+    expect(html).toContain(">calc.py</code>");
+    expect(html).not.toContain("**Finding:**");
+    expect(html).not.toContain("Create draft PR");
+    const evidence = renderToStaticMarkup(<EvidencePanel view={state.run.view!} source={state.run.source} focusPhase={null} />);
+    expect(evidence).toContain("source patch · tests not run");
+    expect(evidence).not.toContain(">Gates<");
   });
 });

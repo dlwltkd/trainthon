@@ -161,6 +161,7 @@ describe("prompt-driven source review", () => {
     expect(f.events.filter(event => event.type === "skill_call").map(event => event.skillId)).toEqual(["source-security-review", "source-remediation", "change-validation"]);
     expect(f.events.filter(event => event.type === "finding_reported")).toEqual([expect.objectContaining({ agentRole: "blue", stage: "REVIEW" })]);
     expect(record.changes.findingIdsByFile).toEqual({ "src/add.ts": ["addition"] });
+    expect(record.findings).toEqual(f.events.filter(event => event.type === "finding_reported"));
     expect(f.events.filter(event => event.type === "state_change").map(event => event.to)).toEqual(["CONTEXT", "REVIEW", "PATCH", "DONE"]);
     assertFinal(record, f);
   });

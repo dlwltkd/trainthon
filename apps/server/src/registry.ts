@@ -14,6 +14,7 @@ export interface RunSummary {
   kind: "benchmark" | "local_repository";
   status: RunStatus;
   mode?: string;
+  workflow?: RunStartEvent["workflow"];
   model?: string;
   condition?: string;
   taskId?: string;
@@ -241,6 +242,7 @@ function summarize(stored: StoredRun): RunSummary | null {
   return {
     runId,
     kind: start.runKind ?? (start.taskId ? "benchmark" : "local_repository"),
+    workflow: start.workflow,
     status: end?.status ?? "RUNNING",
     mode: start.mode, model: start.model, condition: start.condition, taskId: start.taskId,
     repository: snapshot?.type === "repository_snapshot" ? snapshot.name : start.repository?.name,

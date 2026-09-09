@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, KeyRound, X } from "lucide-react";
 import { api, type BenchTask, type Health, type StartRequest } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { repositoryInputError, repositoryStartRequest, type RepositorySourceKind } from "@/lib/repository-source";
 import { Button, Chip, Mono, Spinner, Tabs } from "./ui";
 
 type Kind = "bench" | "repository";
@@ -12,6 +13,9 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
   const [health, setHealth] = useState<Health | null>(null);
   const [taskId, setTaskId] = useState("");
   const [condition, setCondition] = useState<"B" | "C">("C");
+  const [repositorySource, setRepositorySource] = useState<RepositorySourceKind>("github");
+  const [workflow, setWorkflow] = useState<"review" | "repair" | "remediate">("remediate");
+  const [prompt, setPrompt] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [regressionPath, setRegressionPath] = useState("");
   const [reportText, setReportText] = useState("");
@@ -38,15 +42,18 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
   const task = tasks.find((t) => t.id === taskId);
   const live = health && "blue" in health.live ? health.live : null;
   const liveError = health && "error" in health.live ? health.live.error : null;
+  const sourceError = repositoryInputError(repositorySource, repoPath);
+  const repositoryReady = Boolean(repoPath.trim() && !sourceError && (workflow !== "repair" ? prompt.trim() : regressionPath.trim() && (mode !== "scripted" || patchPath.trim())));
+  const workflowTitle = workflow === "remediate" ? "Review & propose fix" : workflow === "review" ? "Repository review" : "Repair with regression";
 
   const submit = async () => {
+    if (busy) return;
     setBusy(true);
     setError(undefined);
-    const body: StartRequest =
-      kind === "bench"
-        ? { kind: "bench", taskId, condition }
-        : { kind: "repository", repoPath, regressionPath, reportText, ref, mode, patchPath: mode === "scripted" ? patchPath : undefined, review };
     try {
+      const body: StartRequest = kind === "bench"
+        ? { kind: "bench", taskId, condition }
+        : repositoryStartRequest({ workflow, prompt, source: repositorySource, repoPath, regressionPath, reportText, ref, mode, patchPath, review });
       const { runId } = await api.start(body);
       onStarted(runId);
     } catch (e) {
@@ -61,8 +68,8 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
       <div className="flex max-h-full w-full max-w-xl flex-col overflow-hidden rounded-t-2xl bg-panel shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
           <div>
-            <div className="text-[1.1em] font-semibold tracking-tight">{kind === "repository" ? "Repository repair" : "Benchmark run"}</div>
-            <div className="text-[0.85em] text-ink-3">{kind === "repository" ? "Validate an existing report, apply a bounded repair, and check the evidence." : "Inspect a recorded fixture workflow with the same activity trace."}</div>
+            <div className="text-[1.1em] font-semibold tracking-tight">{kind === "repository" ? workflowTitle : "Benchmark run"}</div>
+            <div className="text-[0.85em] text-ink-3">{kind === "repository" ? workflow === "remediate" ? "Inspect source, report findings, and propose a patch for you to review." : workflow === "review" ? "Give the agent a source review task and follow its findings with evidence." : "Follow an existing regression test, apply a bounded repair, and check the evidence." : "Inspect a recorded fixture workflow with the same activity trace."}</div>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="close">
             <X className="size-4" />
@@ -75,7 +82,7 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
             onChange={setKind}
             items={[
               { id: "bench", label: "Benchmark fixture" },
-              { id: "repository", label: "Repository repair" },
+              { id: "repository", label: "Repository" },
             ]}
           />
 
@@ -105,21 +112,36 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
             </>
           ) : (
             <>
-              <Field label="Repository path" hint="Local Git root on the server machine. The checked commit is snapshotted; the original is never modified.">
-                <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/repo" className={inputClass} spellCheck={false} />
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[0.85em] font-medium text-ink-2">Workflow</span>
+                <Tabs value={workflow} onChange={setWorkflow} className="h-auto flex-wrap" items={[{ id: "remediate", label: "Review & propose fix" }, { id: "review", label: "Review only" }, { id: "repair", label: "Repair with regression" }]} />
+                <p className="text-[0.8em] text-ink-3">{workflow === "remediate" ? "Review the proposed patch, then choose whether to create a GitHub draft PR. Tests are not run in this workflow." : workflow === "review" ? "Read-only source review. Start with a repository and a prompt." : "Source repair checked against an existing regression test."}</p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[0.85em] font-medium text-ink-2">Repository source</span>
+                <Tabs value={repositorySource} onChange={(next) => { setRepositorySource(next); setRepoPath(""); }} items={[{ id: "github", label: "Public GitHub" }, { id: "local", label: "Local" }]} />
+              </div>
+              <Field label={repositorySource === "github" ? "Public GitHub repository URL" : "Local repository path"} hint={repositorySource === "github" ? "Use a public repository. The selected commit runs in an isolated snapshot." : "Local Git root on the server machine. The selected commit is snapshotted; the original stays untouched."}>
+                <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder={repositorySource === "github" ? "https://github.com/owner/repo" : "/path/to/repo"} className={inputClass} spellCheck={false} aria-invalid={Boolean(sourceError)} required />
+              </Field>
+              {sourceError && <p className="text-[0.85em] text-fail" role="alert">{sourceError}</p>}
+              <Field label={workflow !== "repair" ? "Task prompt (required)" : "Task prompt (optional)"} hint={workflow !== "repair" ? "Describe what to inspect. Findings link back to the source the agent reads." : undefined}>
+                <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={workflow === "remediate" ? "Review the authorization boundaries, report concerns with source references, and propose a focused fix." : "Review the authentication and authorization boundaries, and explain any concerns with source references."} className={cn(inputClass, "resize-y leading-relaxed")} required={workflow !== "repair"} />
               </Field>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Regression test (repo-relative)">
-                  <input value={regressionPath} onChange={(e) => setRegressionPath(e.target.value)} placeholder="tests/security.test.ts" className={inputClass} spellCheck={false} />
+                {workflow === "repair" && (
+                <Field label="Existing regression test (required)" hint="Path relative to the repository.">
+                  <input value={regressionPath} onChange={(e) => setRegressionPath(e.target.value)} placeholder="tests/security.test.ts" className={inputClass} spellCheck={false} required />
                 </Field>
+                )}
                 <Field label="Ref">
                   <input value={ref} onChange={(e) => setRef(e.target.value)} className={inputClass} spellCheck={false} />
                 </Field>
               </div>
-              <Field label="Security report">
-                <textarea value={reportText} onChange={(e) => setReportText(e.target.value)} rows={4} placeholder="Describe the vulnerability the regression test demonstrates…" className={cn(inputClass, "resize-y leading-relaxed")} />
+              <Field label="Security report (optional)" hint={workflow !== "repair" ? "Supplementary context for your prompt. You can leave this empty." : "Without a report, the agent follows the existing regression test and recorded results."}>
+                <textarea value={reportText} onChange={(e) => setReportText(e.target.value)} rows={3} placeholder="Add context about the reported behavior, if available…" className={cn(inputClass, "resize-y leading-relaxed")} />
               </Field>
-              <Field label="Mode">
+              {workflow === "repair" && <Field label="Mode">
                 <Tabs
                   value={mode}
                   onChange={setMode}
@@ -128,8 +150,8 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
                     { id: "scripted", label: "Scripted (supplied patch)" },
                   ]}
                 />
-              </Field>
-              {mode === "scripted" ? (
+              </Field>}
+              {workflow === "repair" && mode === "scripted" ? (
                 <Field label="Patch file" hint="Applied as Blue's change instead of calling a model.">
                   <input value={patchPath} onChange={(e) => setPatchPath(e.target.value)} placeholder="/path/to/fix.diff" className={inputClass} spellCheck={false} />
                 </Field>
@@ -141,20 +163,20 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
                   {live ? (
                     <>
                       <ModelLine role="Blue" model={live.blue} />
-                      <label className="flex items-center gap-2 text-ink-2">
+                      {workflow === "repair" && <label className="flex items-center gap-2 text-ink-2">
                         <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} className="accent-ink" />
                         Red reviews the evidence first (read-only)
-                      </label>
-                      {review && <ModelLine role="Red" model={live.red} />}
+                      </label>}
+                      {workflow === "repair" && review && <ModelLine role="Red" model={live.red} />}
                     </>
                   ) : (
                     <span className="text-fail">{liveError ?? "server unavailable"}</span>
                   )}
                 </div>
               )}
-              <Note icon={<AlertTriangle className="size-3.5 text-warn" />}>
+              {workflow === "repair" ? <Note icon={<AlertTriangle className="size-3.5 text-warn" />}>
                 Requires Docker on the server. Supported: Node repos with one lockfile + Vitest, or Python 3.11 + pinned pytest. Success is <Mono>TESTS_PASSED</Mono> (repository tests, no independent grader).
-              </Note>
+              </Note> : <Note>{workflow === "remediate" ? "Patches are proposed from source inspection and remain untested. GitHub delivery is a separate action after you review the diff." : "Review inspects source without editing files or running tests. Findings include code references for you to assess."}</Note>}
             </>
           )}
 
@@ -165,7 +187,7 @@ export function NewRunDialog({ open, onClose, onStarted }: { open: boolean; onCl
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={submit} disabled={busy || (kind === "bench" ? !taskId : !repoPath || !regressionPath || !reportText.trim() || (mode === "scripted" && !patchPath))}>
+          <Button variant="primary" onClick={submit} disabled={busy || (kind === "bench" ? !taskId : !repositoryReady)}>
             {busy ? <Spinner className="size-3.5" /> : null}
             Start run
           </Button>

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import type { Budgets, EngineState, EventInput, HarnessEvent, RunStatus } from "@vouch/protocol";
+import type { Budgets, EngineState, EventInput, FindingReportedEvent, HarnessEvent, RunStatus } from "@vouch/protocol";
 import { prepareRepositorySnapshot, prepareSourceWorkspace, captureLocalChanges, type LocalWorkspace, type RepositorySnapshot } from "@vouch/sandbox";
 import { BudgetExceededError, RunBudget, RunCancelledError, canonicalizeModelSpec, requireRunnerForSpec, validateModelSpec, type AgentRunner, type ModelSpec } from "@vouch/model";
 import { REPOSITORY_REVIEW_GUIDANCE, SOURCE_REPAIR_GUIDANCE, systemPromptRepositoryReview, systemPromptRepositoryRepair } from "@vouch/skills";
@@ -137,13 +137,15 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   }
   transition("DONE");
   const endedAt = Date.now();
+  const recordedFindings = new Map<string, FindingReportedEvent>();
+  for (const event of logger.getEvents()) if (event.type === "finding_reported") recordedFindings.set(event.findingId, event);
   const record = {
     schemaVersion: 3, kind: "local_repository" as const, workflow, runId, mode: "live" as const, configHash, status, reason, summary,
     startedAt, endedAt, elapsedMs: endedAt - startedAt, costUsd: invoked ? null : 0,
     seed: options.seed, budgets: options.budgets, usage: budget?.usage ?? { inputTokens: 0, outputTokens: 0, steps: 0 }, usageKnown: budget?.usageKnown ?? true,
     repository: { name: source?.name ?? basename(options.repoPath), url: source?.url, requestedRef: options.ref ?? "HEAD", commit: workspace?.commit ?? null, files: workspace?.files.length ?? 0 },
     model: options.model, verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged: status === "PATCH_PROPOSED" },
-    findings: toolset?.findings() ?? [], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },
+    findings: [...recordedFindings.values()], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },
     ...(delivery ? { delivery } : {}), artifacts,
   };
   writeJson(artifacts.record, record);

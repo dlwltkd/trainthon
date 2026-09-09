@@ -4,6 +4,9 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useRun } from "@/hooks/useRun";
 import { useTicker } from "@/hooks/useTicker";
+import { useDraftDelivery } from "@/hooks/useDraftDelivery";
+import { canDeliverPatch } from "@/lib/pull-request";
+import { isRepositoryRemediation } from "@/lib/derive";
 import { ActivityFeed } from "./ActivityFeed";
 import { AgentIntent, type EvidenceTarget } from "./AgentActivity";
 import { CodeView } from "./CodeView";
@@ -12,7 +15,9 @@ import { EvidencePanel } from "./EvidencePanel";
 import { FileTree } from "./FileTree";
 import { RepoHeader } from "./RepoHeader";
 import { StageRail } from "./StageRail";
-import { Button, Empty, PanelHeader, Spinner, Tabs } from "./ui";
+import { FindingsPanel } from "./FindingsPanel";
+import { DraftPullRequest } from "./DraftPullRequest";
+import { Button, Chip, Empty, Panel, PanelHeader, Spinner, Tabs } from "./ui";
 
 type CenterTab = "agent" | "changes" | "file" | "evidence";
 type MobileTab = "activity" | "files" | "results";
@@ -32,6 +37,9 @@ export function RunView({ runId }: { runId: string }) {
 
   const changedPaths = useMemo(() => new Set(view?.changedFiles.keys() ?? []), [view]);
   const files = view?.repository?.files.length ? view.repository.files : source?.files ?? [];
+  const repositoryUrl = view?.repository?.url ?? source?.url;
+  const deliverable = Boolean(view && canDeliverPatch(view.status, repositoryUrl, view.diff.filter((file) => !file.generated).length));
+  const delivery = useDraftDelivery(runId, repositoryUrl, deliverable);
 
   // Auto-focus follows the run only until the viewer picks something themselves.
   useEffect(() => {
@@ -89,17 +97,23 @@ export function RunView({ runId }: { runId: string }) {
       }}
       items={[
         { id: "agent", label: <span className="inline-flex items-center gap-1"><ListChecks className="size-3.5" /> Plan & skills</span>, badge: view.skills.length || undefined },
-        { id: "changes", label: <span className="inline-flex items-center gap-1"><FileDiff className="size-3.5" /> Changes</span>, badge: view.changedFiles.size || undefined },
+        { id: "changes", label: <span className="inline-flex items-center gap-1"><FileDiff className="size-3.5" /> Findings & patch</span>, badge: view.findings.length || view.changedFiles.size || undefined },
         { id: "file", label: <span className="inline-flex items-center gap-1"><FileCode2 className="size-3.5" /> File</span> },
         { id: "evidence", label: <span className="inline-flex items-center gap-1"><FlaskConical className="size-3.5" /> Evidence</span>, badge: view.tests.length || undefined },
       ]}
     />
   );
 
+  const patchBody = <div className="space-y-3 p-3">
+    <FindingsPanel view={view} files={files} onEvidence={navigateEvidence} />
+    <Panel className="overflow-hidden"><PanelHeader title="Proposed patch" aside={isRepositoryRemediation(view) ? <Chip tone="warn">Tests not run</Chip> : undefined} /><DiffView files={view.diff} focusPath={focusDiff} emptyHint={view.status === "RUNNING" ? "Diffs appear when the agent records a source change." : "This run ended without a source patch."} /></Panel>
+    {deliverable && repositoryUrl && <DraftPullRequest delivery={delivery} repositoryUrl={repositoryUrl} tested={view.status === "TESTS_PASSED"} />}
+  </div>;
+
   const centerBody = (
     <div className="min-h-0 flex-1 overflow-auto">
       {center === "agent" && <div className="p-3"><AgentIntent view={view} files={files} onEvidence={navigateEvidence} /></div>}
-      {center === "changes" && <DiffView files={view.diff} focusPath={focusDiff} emptyHint={view.status === "RUNNING" ? "Diffs appear here as soon as the agent writes to a source file." : "This run ended without touching source files."} />}
+      {center === "changes" && patchBody}
       {center === "file" && <CodeView runId={runId} path={selectedFile} available={source?.filesAvailable ?? false} changed={selectedFile ? changedPaths.has(selectedFile) : false} onShowDiff={() => openDiff(selectedFile ?? undefined)} />}
       {center === "evidence" && <EvidencePanel view={view} source={source} focusPhase={focusPhase} />}
     </div>
@@ -117,6 +131,7 @@ export function RunView({ runId }: { runId: string }) {
       <RepoHeader view={view} source={source} now={now} connection={run.connection} playback={run.playback} />
       <StageRail view={view} now={clock} />
       <ReplayBar run={run} />
+      {deliverable && center !== "changes" && <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-canvas px-4 py-2 text-[0.87em]"><span className="text-ink-2">{view.status === "PATCH_PROPOSED" ? "An untested source patch is ready for review." : "A patch with passing repository tests is ready for review."} Inspect the diff before creating a draft PR.</span><Button size="sm" onClick={() => openDiff()}><FileDiff className="size-3.5" /> Review patch</Button></div>}
 
       {/* Desktop: repository | code & evidence | agent activity */}
       <div className="hidden min-h-0 flex-1 gap-px bg-line lg:grid lg:grid-cols-[15rem_minmax(0,1fr)_24rem] xl:grid-cols-[16rem_minmax(0,1fr)_27rem]">
@@ -126,7 +141,7 @@ export function RunView({ runId }: { runId: string }) {
           <Legend />
         </aside>
         <section className="flex min-h-0 flex-col bg-panel">
-          <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-3">{centerTabs}</div>
+          <div className="flex h-10 shrink-0 items-center justify-between overflow-x-auto border-b border-line px-3">{centerTabs}</div>
           {centerBody}
         </section>
         <aside className="relative flex min-h-0 flex-col bg-panel">
@@ -167,13 +182,13 @@ export function RunView({ runId }: { runId: string }) {
                   onChange={(tab) => setCenter(tab)}
                   items={[
                     { id: "agent", label: "Plan & skills" },
-                    { id: "changes", label: "Changes", badge: view.changedFiles.size || undefined },
+                    { id: "changes", label: "Findings & patch", badge: view.findings.length || view.changedFiles.size || undefined },
                     { id: "evidence", label: "Evidence" },
                   ]}
                 />
               </div>
               <div className="min-h-0 flex-1 overflow-auto">
-                {center === "agent" ? <div className="p-3"><AgentIntent view={view} files={files} onEvidence={navigateEvidence} /></div> : center === "evidence" ? <EvidencePanel view={view} source={source} focusPhase={focusPhase} /> : <DiffView files={view.diff} focusPath={focusDiff} emptyHint="No source changes recorded." />}
+                {center === "agent" ? <div className="p-3"><AgentIntent view={view} files={files} onEvidence={navigateEvidence} /></div> : center === "evidence" ? <EvidencePanel view={view} source={source} focusPhase={focusPhase} /> : patchBody}
               </div>
             </div>
           )}

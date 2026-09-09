@@ -11,6 +11,7 @@ export default defineConfig({
   },
   test: {
     include: ["packages/**/*.test.ts", "apps/**/*.test.ts"],
+    exclude: ["apps/dashboard/**", "**/node_modules/**"],
     testTimeout: 15_000,
   },
 });

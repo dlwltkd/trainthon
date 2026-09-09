@@ -36,6 +36,8 @@ import {
 import { formatDuration, formatTime, stringify } from "@/lib/format";
 import { Button, Chip, Mono, RoleChip } from "./ui";
 import { DecisionCard, SkillCard } from "./AgentActivity";
+import { FindingCard } from "./FindingsPanel";
+import { MarkdownSummary } from "./MarkdownSummary";
 
 export interface FeedSelection {
   openFile: (path: string) => void;
@@ -158,6 +160,8 @@ function Entry({ entry, view, files, actions, now }: { entry: FeedEntry; view: R
     else [...document.querySelectorAll<HTMLElement>("[data-activity-id]")].find((node) => node.dataset.activityId === target.value && node.getClientRects().length > 0)?.scrollIntoView({ block: "center", behavior: "smooth" });
   };
   switch (entry.kind) {
+    case "finding":
+      return <Row id={entry.id} icon={<Search className="size-3.5" />} accent={entry.agentRole}><FindingCard finding={entry} view={view} files={files} onEvidence={onEvidence} /></Row>;
     case "skill":
       return <Row id={entry.id} icon={<Puzzle className="size-3.5" />} accent={entry.agentRole}><SkillCard item={entry} /></Row>;
     case "decision":
@@ -203,7 +207,7 @@ function Entry({ entry, view, files, actions, now }: { entry: FeedEntry; view: R
         <Row icon={<MessageSquareText className="size-3.5" />} accent={entry.agentRole} className="rise">
           <div className="flex items-start gap-1.5">
             <RoleChip role={entry.agentRole} className="mt-0.5" />
-            <p className={cn("min-w-0 flex-1 whitespace-pre-wrap leading-relaxed", entry.final ? "text-ink" : "text-ink-2")}>{entry.text}</p>
+            {entry.final ? <MarkdownSummary text={entry.text} className="min-w-0 flex-1 text-ink" /> : <p className="min-w-0 flex-1 whitespace-pre-wrap leading-relaxed text-ink-2">{entry.text}</p>}
           </div>
         </Row>
       );

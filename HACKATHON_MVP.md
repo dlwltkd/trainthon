@@ -1,26 +1,63 @@
 # Vouch hackathon MVP
 
-Hackathon scope for Vouch as a common security-agent framework, with local
-repository repair as its first implemented workflow. The shared architecture is
-defined in [SECURITY_FRAMEWORK.md](./SECURITY_FRAMEWORK.md). This demo narrows the
+Hackathon scope for Vouch as a common security-agent framework, with prompt-based
+repository source review, optional source remediation, and regression-based repair implemented. The shared
+architecture is defined in [SECURITY_FRAMEWORK.md](./SECURITY_FRAMEWORK.md). This demo narrows the
 broader [HARNESS_PLAN.md](./HARNESS_PLAN.md); the benchmark below has not been run.
 The local CLI, repository dashboard, and Hono/SSE server are implemented. The
 dashboard shows real skill calls, public decision summaries, plans, tools, and
-test evidence, including live CLI runs and labeled replay. The QR flow, GitHub
-integration, draft PR creation, and Bench comparisons described below remain
-planned.
+source/test evidence, including live CLI runs and labeled replay. Public GitHub
+URLs work through anonymous HTTPS acquisition. GitHub App/OAuth, private remote
+access, the QR flow, and Bench comparisons remain planned. A local-server action
+can deliver recorded patches as draft PRs to public repositories where the
+configured GitHub token has push access.
 
 **Pitch:** Vouch gives defensive security agents a common execution structure:
-skills, bounded tools, visible decisions, and evidence for their results. The first
-workflow turns a security report and existing regression test into a candidate
-patch with before/after evidence. A planned paired benchmark will measure whether
-the harness improves the same model's security repair performance.
+skills, bounded tools, visible decisions, and evidence for their results. Start
+with a repository URL and prompt for a source review, or opt into a proposed
+source patch with `--fix`. Supply an existing
+regression to request a repair with before/after test evidence. A planned paired
+benchmark will measure whether the harness improves the same model's security
+repair performance.
 
 New workflows should reuse that execution and viewing structure while defining
-their own inputs, roles, tool permissions, stages, and verification scope. Code
-review, configuration review, dependency review, and incident-artifact review
-remain planned; the current repair roles and test-based verdicts do not define
-the whole framework.
+their own inputs, roles, tool permissions, stages, and verification scope. Dedicated
+configuration, dependency, and incident-artifact review workflows remain planned.
+A general workflow registry is also planned; the repository workflows have
+explicit entry points today.
+
+The default source-review demo needs only a public repository URL and prompt:
+
+```bash
+pnpm cli run \
+  --repo https://github.com/owner/repo \
+  --prompt 'Review authentication and authorization boundaries' \
+  --mode live
+```
+
+`--report` is optional. This workflow requires no regression, test suite,
+dependency installation, or Docker: the agent only reads pinned source and
+records evidence for its review. `REVIEW_COMPLETE` has scope `source_review`; it
+does not prove the repository secure. `INCOMPLETE_REVIEW` remains a distinct
+outcome. Public source snapshots persist for later file previews. These URL runs
+use the presenter's local harness, without a GitHub App or Actions integration.
+
+Add `--fix` to the prompt-based run to permit justified application-source edits.
+The agent records findings with observed file evidence and uses
+`source-remediation` before editing, then `change-validation` and `inspect_diff`
+after the final edit. `PATCH_PROPOSED` has scope `source_patch` and explicitly
+records that tests were not run. It must remain distinct from a regression repair
+that reaches `TESTS_PASSED`. Reports remain optional for repository workflows; `--fix` and
+`--regression` select different validation paths and cannot be combined.
+
+The result view's **Create draft PR** button calls
+`POST /api/runs/:runId/pull-request` for a recorded public-repository source patch
+with status `PATCH_PROPOSED` or `TESTS_PASSED`. The local server needs
+`GITHUB_TOKEN` or `GH_TOKEN` with Contents and Pull requests write permissions
+and push access to that repository. Delivery creates a dedicated branch and a
+draft against the still-current checked default-branch commit. Untested proposals
+are labeled untested; no fork or automatic merge is provided. The GitHub
+App/OAuth and audience-owned Actions flow below remains separate planned work.
 
 ## Product: Run, Bench, and a QR audience experience
 
@@ -35,12 +72,12 @@ Use the existing TypeScript engine, a local Hono API with SSE, and a React/Vite
 interface. Keep JSONL as the record of each run. Prepared local targets remain the
 benchmark environment. The audience demo adds GitHub sign-in, selected-repository
 access, and GitHub-hosted Actions execution against participants' actual projects.
-Support JS/TS repositories using Vitest and a lockfile, and Python 3.11
-repositories with pinned pytest requirements; show these requirements before
-connection. Other test adapters and
-production-server deployment come later.
+The repair workflow supports JS/TS repositories using Vitest and a lockfile, and
+Python 3.11 repositories with pinned pytest requirements; show these requirements
+before selecting repair. Source review has no test-adapter requirement. Other
+test adapters and production-server deployment come later.
 
-The demo has three beats:
+The repair demonstration has three beats:
 
 1. A real test demonstrates the reported vulnerability. Show the input, the
    affected behavior, and the failing security assertion.
@@ -50,8 +87,9 @@ The demo has three beats:
    no patch. Open the benchmark to show whether this behavior generalizes across
    the selected tasks and models.
 
-Provide a visibly labeled replay of a saved run for presentation timing. Reserve
-"live" for runs actually invoking a provider and executing tests.
+Provide a visibly labeled replay of a saved run for presentation timing. A live
+event stream follows a current run; show provider calls and test execution only
+when those operations occur in its selected workflow.
 
 ## Demo UI: repository and agent activity
 
@@ -59,8 +97,10 @@ The UI is a core MVP requirement. An audience member should immediately recogniz
 whose repository is open, what the agent is doing, and what evidence supports the
 result. The local implementation now provides the repository tree, code and diff
 panes, linked test evidence, current decision and next action, plan status, skill
-calls, and expandable tool activity. The table retains the full product target;
-GitHub identity, audience access, and result PRs still need integration.
+calls, and expandable tool activity. Source-review results show their source
+evidence and coverage separately from repair test verdicts. The table retains
+the full product target; authenticated audience identity and the App/Actions
+delivery flow still need integration.
 
 | Area | Required content and behavior |
 | --- | --- |
@@ -94,7 +134,10 @@ guidance remains separately labeled. `report_progress` records a public decision
 summary, next action, evidence paths, and a plan of up to six steps. The harness
 requires a skill call and initial plan before repository tools, and accepts
 evidence paths only from the supplied test, read/search results, or successful
-source edits. These updates explain the agent's decisions without exposing hidden
+source edits. Review specializations include authentication boundaries,
+configuration/dependency declarations, and remediation planning. Actual
+`report_finding` calls record severity, confidence, observed files, and defensive
+recommendations. These updates explain the agent's decisions without exposing hidden
 reasoning or fabricating narration.
 
 The implemented event and viewing path provides:
@@ -107,10 +150,10 @@ The implemented event and viewing path provides:
 - Live SSE updates for server-started runs and CLI events observed from disk,
   plus explicitly labeled recorded playback with pause, seek, and speed controls.
   Missing completion events show an inactive stream rather than a finished run.
-- Checked-commit file previews, recorded diffs, and persisted test evidence.
-  New local runs retain the source path in private `repository.json` metadata;
-  older runs or unavailable repositories may lack file previews while recorded
-  activity and evidence remain accessible.
+- Checked-commit file previews, recorded diffs, and persisted source/test evidence.
+  Public GitHub runs retain source snapshots; local repair runs also support the
+  source path in private `repository.json` metadata. Older runs may lack file
+  previews while recorded activity and evidence remain accessible.
 
 If a supplied regression already passes, the view says no model was invoked and
 shows harness checks without inventing skill calls or a plan. The server binds to
@@ -199,8 +242,9 @@ account plan and repository visibility.
 [draft PR availability](https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request),
 [OIDC gateway pattern](https://docs.github.com/en/actions/how-tos/manage-runners/github-hosted-runners/connect-to-a-private-network/connect-with-oidc)
 
-The first existing-repository harness slice is now implemented in the CLI. It
-accepts a local Git root, pinned ref, supplied report, and designated regression;
+The regression-based repair workflow is implemented in the CLI alongside source
+review. It accepts a local Git root or public GitHub URL, pinned ref, and designated
+regression, with an optional report and supplemental prompt. It
 uses the project's locked Vitest installation or pinned pytest requirements in Docker; permits source-only
 changes; and persists the patch, structured before/after test evidence, run record,
 and correlated event log before cleanup. Records bind the run to the commit,
@@ -211,7 +255,7 @@ structured output. It does not load a benchmark task or hidden grader. Local
 success is `TESTS_PASSED`, with verification scope `repository_tests` and
 `independentGrader: false`; this path never emits `FIXED_VERIFIED`.
 
-This local slice assumes the repository owner trusts the selected commit,
+The repair workflow assumes the repository owner trusts the selected commit,
 lockfile, Vitest dependency, and tests. Executable repository Vitest and Vite
 configuration and environment files are disabled; immutable harness options drive
 collection and execution, including an empty inline PostCSS configuration.
@@ -239,6 +283,13 @@ The GitHub-hosted product path still needs these integration changes:
 - Verify using preserved before/after evidence and protected project tests,
   without requiring `bench/graders/<taskId>`. Retain the patch and evidence before
   cleanup and bind the result PR to the checked revision.
+
+The current sandbox executes the supplied regression and functional tests in
+containers with networking disabled. Red reviews code and observed test results
+through read-only tools. A separate adapter for isolated application-server
+startup, health checks, existing tests, bounded logs, and cleanup is planned; that
+server lifecycle is not implemented yet. These repository workflows do not add
+automatic attacks, generated payloads, or new reproduction tests.
 
 During the presentation, show the QR while the presenter checks an existing project.
 An opt-in audience activity panel can show joined participants and run outcomes;

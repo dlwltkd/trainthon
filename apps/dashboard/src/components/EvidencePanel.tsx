@@ -3,15 +3,19 @@ import type { TestRunEvent } from "@vouch/protocol";
 import { ShieldCheck, ShieldAlert, ShieldQuestion, FlaskConical, ScrollText, Scale } from "lucide-react";
 import { api, type RunSource } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { STATUS_LABEL, statusDescription, statusTone, type RunView } from "@/lib/derive";
+import { STATUS_LABEL, isRepositoryReview, isRepositoryRemediation, statusDescription, statusTone, type RunView } from "@/lib/derive";
 import { formatDuration, stringify } from "@/lib/format";
 import { Source } from "./CodeView";
 import { Chip, Mono, Panel, Spinner } from "./ui";
+import { MarkdownSummary } from "./MarkdownSummary";
 
 export function EvidencePanel({ view, source, focusPhase }: { view: RunView; source: RunSource | null; focusPhase: string | null }) {
   const tone = statusTone(view.status);
   const Icon = tone === "pass" ? ShieldCheck : tone === "fail" ? ShieldAlert : ShieldQuestion;
-  const scope = view.kind === "local_repository" ? "repository tests · no independent grader" : view.grade ? "hidden grader" : "benchmark gate";
+  const sourceReview = isRepositoryReview(view);
+  const sourcePatch = isRepositoryRemediation(view);
+  const finalSummary = [...view.activity].reverse().find((item) => item.kind === "note" && item.final);
+  const scope = sourcePatch ? "source patch · tests not run" : sourceReview ? "source review · model-reported findings" : view.kind === "local_repository" ? "repository tests · no independent grader" : view.grade ? "hidden grader" : "benchmark gate";
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -42,7 +46,9 @@ export function EvidencePanel({ view, source, focusPhase }: { view: RunView; sou
         </div>
       </Panel>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      {(sourceReview || sourcePatch) && <Panel className="p-4"><SectionTitle icon={<ScrollText className="size-3.5" />}>{sourcePatch ? "Review & patch notes" : "Review findings"}</SectionTitle>{finalSummary?.kind === "note" ? <MarkdownSummary text={finalSummary.text} className="mt-3 text-[0.94em] text-ink-2" /> : <p className="mt-3 text-[0.94em] leading-relaxed text-ink-2">A final summary has not been recorded. Current decisions and source references are available in Plan & skills.</p>}</Panel>}
+
+      {!sourceReview && !sourcePatch && <div className="grid gap-3 lg:grid-cols-2">
         <Panel className="p-3">
           <SectionTitle icon={<Scale className="size-3.5" />}>Gates</SectionTitle>
           <div className="mt-2 flex flex-col gap-2">
@@ -84,9 +90,11 @@ export function EvidencePanel({ view, source, focusPhase }: { view: RunView; sou
             </div>
           </Panel>
         )}
-      </div>
+      </div>}
 
-      {view.tests.length > 0 && <BeforeAfter view={view} focusPhase={focusPhase} />}
+      {!sourceReview && view.tests.length > 0 && <BeforeAfter view={view} focusPhase={focusPhase} />}
+
+      {source?.prompt && <Panel className="p-3"><SectionTitle icon={<ScrollText className="size-3.5" />}>Task prompt</SectionTitle><p className="mt-2 whitespace-pre-wrap text-[0.92em] leading-relaxed text-ink-2">{source.prompt}</p></Panel>}
 
       {(source?.report || source?.regression) && (
         <div className="grid gap-3 lg:grid-cols-2">

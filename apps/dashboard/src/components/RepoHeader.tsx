@@ -1,7 +1,8 @@
-import { GitBranch, GitCommitHorizontal, Cpu, Timer, Coins, Files } from "lucide-react";
-import type { RunView } from "@/lib/derive";
+import { GitBranch, GitCommitHorizontal, ExternalLink, Cpu, Timer, Coins, Files } from "lucide-react";
+import { repositoryWorkflowLabel, type RunView } from "@/lib/derive";
 import type { RunSource } from "@/lib/api";
 import { formatClock, formatCost, formatTokens, shortSha } from "@/lib/format";
+import { githubRepositoryUrl, githubCommitUrl } from "@/lib/repository-source";
 import { Chip, Meter, Mono, RoleChip, StatusChip } from "./ui";
 import type { Connection, PlaybackMode } from "@/hooks/useRun";
 
@@ -20,6 +21,8 @@ export function RepoHeader({
 }) {
   const name = view.repository?.name ?? source?.name ?? view.taskId ?? view.runId;
   const commit = view.repository?.commit ?? source?.commit;
+  const origin = githubRepositoryUrl(view.repository?.url ?? source?.url);
+  const commitLink = githubCommitUrl(origin ?? undefined, commit);
   const ref = view.repository?.ref ?? source?.ref ?? (view.kind === "benchmark" ? "fixture" : "HEAD");
   const elapsed = view.endedAt ? view.elapsedMs ?? view.endedAt - view.startedAt : Math.max(0, (playback === "live" ? now : view.lastTs) - view.startedAt);
   const budgets = view.budgets;
@@ -32,7 +35,7 @@ export function RepoHeader({
           <h1 className="truncate text-[1.25em] font-semibold tracking-tight">{name}</h1>
           <StatusChip status={view.status} />
           <ModeChip view={view} playback={playback} connection={connection} />
-          {view.kind === "local_repository" && <Chip tone="neutral">Repository repair</Chip>}
+          {view.kind === "local_repository" && <Chip tone="neutral">{repositoryWorkflowLabel(view)}</Chip>}
           {view.condition && (
             <Chip tone="neutral" className="secondary">
               condition {view.condition}
@@ -40,14 +43,15 @@ export function RepoHeader({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.9em] text-ink-2">
+          {origin && <a href={origin} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-info hover:underline" title={origin}><ExternalLink className="size-3.5" /><Mono>{origin.slice("https://github.com/".length)}</Mono></a>}
           <span className="inline-flex items-center gap-1.5">
             <GitBranch className="size-3.5 text-ink-3" />
             <Mono>{ref}</Mono>
           </span>
-          <span className="inline-flex items-center gap-1.5" title={commit}>
+          {commitLink ? <a href={commitLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-info hover:underline" title={`Exact commit: ${commit}`}><GitCommitHorizontal className="size-3.5" /><Mono>{shortSha(commit)}</Mono></a> : <span className="inline-flex items-center gap-1.5" title={commit}>
             <GitCommitHorizontal className="size-3.5 text-ink-3" />
             <Mono>{shortSha(commit)}</Mono>
-          </span>
+          </span>}
           <span className="inline-flex items-center gap-1.5">
             <Files className="size-3.5 text-ink-3" />
             {fileCount} files

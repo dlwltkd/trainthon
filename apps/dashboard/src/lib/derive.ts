@@ -150,6 +150,23 @@ export interface DecisionItem {
   stage: EngineState;
 }
 
+export interface FindingItem {
+  kind: "finding";
+  id: string;
+  seq: number;
+  ts: number;
+  findingId: string;
+  title: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  confidence: "confirmed" | "potential";
+  evidence: string[];
+  summary: string;
+  recommendation: string;
+  callId: string;
+  agentRole: AgentRole;
+  stage: EngineState;
+}
+
 export interface ChangeItem {
   kind: "change";
   id: string;
@@ -190,6 +207,7 @@ export type ActivityItem =
   | GuidanceItem
   | SkillItem
   | DecisionItem
+  | FindingItem
   | ChangeItem
   | EndItem
   | GradeItem;
@@ -205,6 +223,7 @@ export interface RunView {
   runId: string;
   kind: "benchmark" | "local_repository";
   mode?: string;
+  workflow?: "repository_review" | "repository_repair" | "repository_remediation";
   condition?: string;
   taskId?: string;
   status: RunStatus;
@@ -216,7 +235,7 @@ export interface RunView {
   costUsd: number | null;
   budgets?: Budgets;
   usage: { tokens: number; steps: number; elapsedMs: number; modelTurns: number };
-  repository?: { name: string; commit?: string; ref?: string; files: string[] };
+  repository?: { name: string; url?: string; commit?: string; ref?: string; files: string[] };
   stages: StageView[];
   currentStage: EngineState;
   currentRole?: AgentRole;
@@ -224,6 +243,7 @@ export interface RunView {
   guidance: GuidanceItem[];
   skills: SkillItem[];
   decisions: DecisionItem[];
+  findings: FindingItem[];
   currentDecision?: DecisionItem;
   activity: ActivityItem[];
   currentAction?: ToolCallItem;
@@ -372,6 +392,7 @@ export function deriveRun(events: HarnessEvent[]): RunView | null {
     runId: start.runId,
     kind: start.runKind ?? (start.taskId ? "benchmark" : "local_repository"),
     mode: start.mode,
+    workflow: start.workflow,
     condition: start.condition,
     taskId: start.taskId,
     status: "RUNNING",
@@ -387,6 +408,7 @@ export function deriveRun(events: HarnessEvent[]): RunView | null {
     guidance: [],
     skills: [],
     decisions: [],
+    findings: [],
     activity: [],
     tools: new Map(),
     inspectedFiles: new Set(),
@@ -433,7 +455,7 @@ export function deriveRun(events: HarnessEvent[]): RunView | null {
         break;
       }
       case "repository_snapshot": {
-        view.repository = { name: event.name, commit: event.commit, ref: view.repository?.ref, files: event.files };
+        view.repository = { name: event.name, url: ("url" in event && typeof event.url === "string" ? event.url : undefined) ?? view.repository?.url, commit: event.commit, ref: view.repository?.ref, files: event.files };
         break;
       }
       case "role_assigned": {
@@ -480,6 +502,12 @@ export function deriveRun(events: HarnessEvent[]): RunView | null {
         const item: DecisionItem = { ...event, kind: "decision", id: `decision-${event.seq}` };
         view.decisions.push(item);
         view.currentDecision = item;
+        view.activity.push(item);
+        break;
+      }
+      case "finding_reported": {
+        const item: FindingItem = { ...event, kind: "finding", id: `finding-${event.seq}` };
+        view.findings = [...view.findings.filter((finding) => finding.findingId !== item.findingId), item];
         view.activity.push(item);
         break;
       }
@@ -696,6 +724,7 @@ export function statusTone(status: RunStatus): "pass" | "fail" | "info" | "warn"
     case "TESTS_PASSED":
       return "pass";
     case "NOT_REPRODUCIBLE":
+    case "REVIEW_COMPLETE":
       return "info";
     case "FAILED_NO_FIX":
     case "BROKE_FUNCTION":
@@ -703,6 +732,8 @@ export function statusTone(status: RunStatus): "pass" | "fail" | "info" | "warn"
       return "fail";
     case "BUDGET_TIMEOUT":
     case "CANCELLED":
+    case "INCOMPLETE_REVIEW":
+    case "PATCH_PROPOSED":
       return "warn";
     default:
       return "neutral";
@@ -713,6 +744,9 @@ export const STATUS_LABEL: Record<RunStatus, string> = {
   RUNNING: "Running",
   FIXED_VERIFIED: "Fixed · verified",
   TESTS_PASSED: "Tests passed",
+  REVIEW_COMPLETE: "Review complete",
+  INCOMPLETE_REVIEW: "Incomplete review",
+  PATCH_PROPOSED: "Patch proposed · untested",
   NOT_REPRODUCIBLE: "Not reproducible",
   FAILED_NO_FIX: "No fix",
   BROKE_FUNCTION: "Broke function",
@@ -725,6 +759,12 @@ export const STATUS_LABEL: Record<RunStatus, string> = {
 
 export function statusDescription(view: RunView): string {
   switch (view.status) {
+    case "PATCH_PROPOSED":
+      return "A source patch was proposed from code inspection. Tests were not run. Review the diff and findings before delivery.";
+    case "REVIEW_COMPLETE":
+      return "Read-only source review completed. Findings describe the inspected code; tests were not run.";
+    case "INCOMPLETE_REVIEW":
+      return "The source review ended before a complete summary was recorded. Inspect the available notes and evidence.";
     case "TESTS_PASSED":
       return "Supplied regression and protected functional tests pass in a fresh workspace. Scope: repository tests, no independent grader — needs code review.";
     case "FIXED_VERIFIED":
@@ -736,10 +776,22 @@ export function statusDescription(view: RunView): string {
     case "BROKE_FUNCTION":
       return "The regression passes but functional tests now fail.";
     case "RUNNING":
-      return "The harness is executing.";
+      return isRepositoryReview(view) ? "The agent is reviewing source for the requested task." : "The harness is executing.";
     default:
       return view.reason ?? "";
   }
+}
+
+export function isRepositoryReview(view: Pick<RunView, "workflow" | "status">): boolean {
+  return view.workflow === "repository_review" || view.status === "REVIEW_COMPLETE" || view.status === "INCOMPLETE_REVIEW";
+}
+
+export function isRepositoryRemediation(view: Pick<RunView, "workflow" | "status">): boolean {
+  return view.workflow === "repository_remediation" || view.status === "PATCH_PROPOSED";
+}
+
+export function repositoryWorkflowLabel(view: Pick<RunView, "workflow" | "status">): string {
+  return isRepositoryRemediation(view) ? "Review & propose fix" : isRepositoryReview(view) ? "Repository review" : "Repair with regression";
 }
 
 export function roleLabel(role: AgentRole | undefined): string {

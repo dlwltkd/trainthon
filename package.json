@@ -10,7 +10,7 @@
     "dev:server": "pnpm --filter @vouch/server dev",
     "dev:dashboard": "pnpm --filter @vouch/dashboard dev",
     "build:dashboard": "pnpm --filter @vouch/dashboard build",
-    "test": "vitest run",
+    "test": "vitest run && pnpm --filter @vouch/dashboard test:ui",
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @vouch/dashboard typecheck"
   },
   "devDependencies": {
