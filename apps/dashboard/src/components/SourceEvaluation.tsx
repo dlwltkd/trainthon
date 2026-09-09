@@ -41,7 +41,7 @@ export function SourceEvaluationCard({ evaluation }: { evaluation: SourceEvaluat
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
           {summary.arms.map(arm => <div key={arm.arm} className={`rounded-xl border p-4 ${arm.arm === "vouch" ? "border-blue-role/25 bg-blue-role/5" : "border-line bg-canvas/50"}`}>
             <div className="text-[0.85em] font-medium text-ink-2">{arm.arm === "vouch" ? "Vouch · Red → Blue" : "Codex CLI · source-only"}</div>
-            <div className="mt-2 flex items-end gap-2"><span className="text-4xl font-semibold tabular-nums tracking-tight">{percent(arm.accuracy)}</span><span className="pb-1 text-ink-3">{arm.correct}/{arm.total}</span></div>
+            <div className="mt-2 flex items-end gap-2"><span className="text-4xl font-semibold tabular-nums tracking-tight">{percent(arm.completed + arm.errors ? arm.accuracy : null)}</span><span className="pb-1 text-ink-3">{arm.correct}/{arm.total}</span></div>
             <div className="mt-1 text-[0.85em] text-ink-3">Label agreement{!summary.complete && " · provisional"}</div>
             <div className="mt-4 border-t border-line pt-3 text-[0.85em] text-ink-2"><div>Reference agreement <strong>{arm.referenceMatches}/{summary.vulnerableCases}</strong></div><div className="mt-1">Fixed controls preserved <strong>{arm.controlsUnchanged}/{summary.controlCases}</strong></div><div className="mt-1">{arm.errors} failed or cancelled · {formatDuration(arm.elapsedMs)} total</div></div>
           </div>)}
@@ -79,7 +79,7 @@ export function SourceEvaluationCard({ evaluation }: { evaluation: SourceEvaluat
 
 function TrialResult({ task, trial, evaluationId }: { task: EvaluationCase; trial?: EvaluationTrial; evaluationId: string }) {
   if (!trial || trial.status === "pending") return <span className="text-ink-3">Queued</span>;
-  if (trial.status === "running") return <div className="flex flex-col items-start gap-2"><Chip tone="running" dot>Running</Chip>{trial.runId && <a href={routeHref({ name: "run", runId: trial.runId })} className="text-[0.85em] underline">Watch agent activity</a>}</div>;
+  if (trial.status === "running") return <div className="flex flex-col items-start gap-2"><Chip tone="running" dot>Running</Chip>{trial.startedAt && <span className="text-[0.8em] text-ink-3">{formatDuration(Math.max(0, Date.now() - trial.startedAt))} elapsed</span>}{trial.runId && <a href={routeHref({ name: "run", runId: trial.runId })} className="text-[0.85em] underline">Watch agent activity</a>}</div>;
   const correct = trial.status === "completed" && trial.evidenceValid === true && trial.verdict === (task.variant === "before" ? "issue_present" : "issue_absent");
   const artifact = (name: string) => `/api/evaluations/${encodeURIComponent(evaluationId)}/artifact?case=${encodeURIComponent(task.id)}&arm=${trial.arm}&name=${name}`;
   return <div className="space-y-2">

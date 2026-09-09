@@ -49,7 +49,7 @@ export function App() {
             Runs
           </NavLink>
           <NavLink active={route.name === "bench"} href={routeHref({ name: "bench" })}>
-            Bench
+            Evidence
           </NavLink>
         </nav>
         <div className="ml-auto flex items-center gap-1.5">

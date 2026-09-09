@@ -14,7 +14,7 @@ public decision summaries, plans, tools, and supporting evidence. Source review,
 source remediation, and regression-based repair are implemented. Dedicated configuration, dependency,
 and incident-artifact review workflows remain planned, along with GitHub
 App/OAuth connection, private remote repository access, the QR audience flow, and
-benchmark comparisons. Public-repository draft PR delivery is available through
+large-scale benchmark comparisons. Public-repository draft PR delivery is available through
 an explicit action in the dashboard.
 
 ## Why Vouch
@@ -31,8 +31,9 @@ an explicit action in the dashboard.
   configuration, usage, and correlated tool events. Watch a running CLI session in
   the dashboard or replay its recorded events.
 
-The planned benchmark compares models with and without the harness. No measured
-security-performance improvement is claimed yet.
+A live CVEfixes source pilot compares the same model in a disclosed Codex CLI
+configuration and the Vouch workflow. No general security-performance improvement
+is claimed. See [the cohort, grading policy, and limitations](bench/CVEFIXES.md).
 
 ## How it's built
 
@@ -88,6 +89,19 @@ pnpm --filter @vouch/server start
 Open [http://127.0.0.1:8787](http://127.0.0.1:8787). Provider keys are loaded by the
 server from the root `.env`; the browser receives configuration and key-presence
 status, never the keys. `pnpm typecheck` checks both the harness and dashboard.
+
+Run the paired source pilot with the native Codex CLI and Python 3 installed:
+
+```bash
+pnpm cli eval --suite cvefixes --prepare
+pnpm cli eval --suite cvefixes
+```
+
+The **Evidence** page at `/#/bench` shows all eight trials, including failures,
+with verdicts, candidate artifacts, source hashes, and Vouch agent traces. The
+registered model is `gpt-5.6-sol` for both conditions. This pilot compares source
+labels and published patch references; it does not run CVE reproduction or
+runtime regression tests.
 
 The repository workflows accept a local Git path or an anonymous public HTTPS GitHub URL
 in the form `https://github.com/owner/repo` (an optional `.git` suffix and trailing
