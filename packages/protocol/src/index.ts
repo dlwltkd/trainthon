@@ -360,4 +360,5 @@ export const DEFAULT_REPOSITORY_BUDGETS: Budgets = {
   // Demo source reviews do not impose a cumulative token ceiling. Steps and
   // wall time remain bounded so a stalled provider cannot run forever.
   maxTokens: Number.MAX_SAFE_INTEGER,
+  maxWallMs: 20 * 60_000,
 };

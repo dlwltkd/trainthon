@@ -177,7 +177,8 @@ rewriting their full contents. Prompt workflows do not impose a cumulative
 token ceiling across both roles, including conservative accounting when
 a gateway omits usage. Red investigates the requested source paths and returns
 its handoff when finished; there is no separate Red token or step cutoff.
-The shared 40-step and eight-minute run limits still apply. The handoff must
+The shared 40-step and twenty-minute run limits still apply, including provider
+retry waits and Blue validation. The handoff must
 disclose unread source and unresolved questions. Existing-test and benchmark workflows retain their
 200,000-token default. Before each model request, the harness
 also reserves a conservative allowance for its context and output. A request
