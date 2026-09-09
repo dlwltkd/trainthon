@@ -18,7 +18,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { isHiddenPath, safePath } from "./fs-tools.js";
 import { runCommand } from "./exec.js";
@@ -51,31 +51,6 @@ export function readBoundedRegularFile(path: string, maxBytes: number, label = "
   } finally {
     closeSync(fd);
   }
-}
-
-function configuredSupportFiles(original: Map<string, Buffer>): Set<string> {
-  const protectedFiles = new Set<string>();
-  const queue = [...original.keys()].filter(path => /(?:^|\/)(?:vitest|vite)(?:\.[^/]*)*\.(?:config|workspace)\.[cm]?[jt]sx?$/.test(path));
-  for (const path of queue) {
-    if (protectedFiles.has(path)) continue;
-    protectedFiles.add(path);
-    const text = original.get(path)?.toString("utf8") ?? "";
-    for (const match of text.matchAll(/\b(?:import|require)\s*\(([^)]*)\)/g)) {
-      const expression = match[1]!.trim();
-      if (!/^(?:"[^"\n]+"|'[^'\n]+'|`[^`$\n]+`)$/.test(expression)) {
-        throw new Error(`dynamic config dependency is unsupported: ${path}`);
-      }
-    }
-    for (const match of text.matchAll(/["'`]([^"'`\n]+)["'`]/g)) {
-      const literal = match[1]!;
-      if (!literal || literal.includes("${") || isAbsolute(literal) || /^[a-z]+:/i.test(literal)) continue;
-      const target = relative("/", resolve("/", dirname(path), literal));
-      for (const candidate of [target, ...[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".json", "/index.ts", "/index.tsx", "/index.js", "/index.jsx", "/index.mts", "/index.cts", "/index.mjs", "/index.cjs"].map(ext => target + ext)]) {
-        if (original.has(candidate) && !protectedFiles.has(candidate)) queue.push(candidate);
-      }
-    }
-  }
-  return protectedFiles;
 }
 
 export interface LocalWorkspace {
@@ -164,11 +139,10 @@ export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions):
   modes.set(opts.regressionPath, 0o644);
   mkdirSync(resolve(opts.workspacesDir), { recursive: true, mode: 0o700 });
   const root = mkdtempSync(join(resolve(opts.workspacesDir), "local-"));
-  const supportFiles = configuredSupportFiles(original);
   const workspace: LocalWorkspace = {
     dir: join(root, "candidate"), baselineDir: join(root, "baseline"), verificationDir: join(root, "verification"),
     commit, regressionPath: opts.regressionPath, regressionHash: hash(regression), files: [...original.keys()].sort(),
-    protectedPaths: [...original.keys()].filter(path => path === opts.regressionPath || !isSourcePath(path) || supportFiles.has(path)).sort(),
+    protectedPaths: [...original.keys()].filter(path => path === opts.regressionPath || !isSourcePath(path)).sort(),
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
   try {

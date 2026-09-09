@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyVitestEvidence, DockerProjectRunner, type VitestEvidence } from "./docker-project.js";
@@ -84,11 +84,18 @@ test("Docker project runner mounts only isolated data and disables networking fo
     expect(run.args).toContain("compress=false");
     expect(run.args).toContain(`type=bind,src=${baselineDir},dst=/repo,readonly`);
     expect(run.args.some(arg => arg.includes("dst=/evidence"))).toBe(false);
+    const toolsMount = run.args.find(arg => arg.startsWith("type=bind,src=") && arg.endsWith(",dst=/vouch,readonly"))!;
+    const toolsDir = toolsMount.slice("type=bind,src=".length, -",dst=/vouch,readonly".length);
+    const launcher = readFileSync(join(toolsDir, "run.mjs"), "utf8");
+    expect(launcher).toContain("config:false");
+    expect(launcher).toContain("configFile:false");
+    expect(launcher).toContain("postcss:{plugins:[]}");
     expect(run.opts.maxOutputBytes).toBe(3_000_000);
     expect(run.args.join(" ")).not.toContain("docker.sock");
     expect(JSON.stringify(calls)).not.toContain(sentinel);
     expect(calls.some(call => call.args.includes("--ignore-scripts"))).toBe(true);
     expect(runner.runtime?.packageManager).toBe("npm@10.9.8");
+    expect(runner.runtime?.repositoryConfig).toBe("disabled");
     expect(calls.filter(call => call.args[0] === "rm")).toHaveLength(3);
   } finally { delete process.env.VOUCH_SANDBOX_TEST_SECRET; await runner.cleanup(); }
 });
@@ -138,4 +145,14 @@ test("pnpm setup binds runner provenance to the root importer", async () => {
   const workspace: LocalWorkspace = { dir: join(root, "candidate"), baselineDir, verificationDir: join(root, "verification"), commit: "0".repeat(40), files: [], protectedPaths: [], regressionPath: "regression.test.ts", regressionHash: "x", cleanup() {} };
   const runner = new DockerProjectRunner({ invoke: async () => success });
   await expect(runner.prepare(workspace)).rejects.toThrow("root pnpm importer");
+});
+
+test("project runner rejects Vitest 3", async () => {
+  const root = mkdtempSync(join(tmpdir(), "vouch-docker-vitest3-")); roots.push(root);
+  const baselineDir = join(root, "baseline"); mkdirSync(baselineDir);
+  writeFileSync(join(baselineDir, "package.json"), '{"packageManager":"pnpm@10.33.3","devDependencies":{"vitest":"3.2.4"}}');
+  writeFileSync(join(baselineDir, "pnpm-lock.yaml"), pnpmLock.replaceAll("5.0.0", "3.2.4"));
+  const workspace: LocalWorkspace = { dir: join(root, "candidate"), baselineDir, verificationDir: join(root, "verification"), commit: "0".repeat(40), files: [], protectedPaths: [], regressionPath: "regression.test.ts", regressionHash: "x", cleanup() {} };
+  const runner = new DockerProjectRunner({ invoke: async () => success });
+  await expect(runner.prepare(workspace)).rejects.toThrow("Vitest 4 or 5");
 });

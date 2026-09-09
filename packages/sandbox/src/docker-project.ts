@@ -23,6 +23,7 @@ export interface StructuredTestResult {
 }
 export interface ProjectRuntime {
   adapter: "vitest";
+  repositoryConfig: "disabled";
   image: string;
   lockfile: "package-lock.json" | "pnpm-lock.yaml";
   lockfileHash: string;
@@ -115,7 +116,7 @@ function validatePnpmLock(bytes: Buffer): void {
     throw new Error("root pnpm importer must resolve the declared Vitest package directly");
   }
   const vitestVersion = vitest.version.split("(", 1)[0]!;
-  if (!/^[345]\./.test(vitestVersion)) throw new Error("root pnpm importer must pin Vitest 3, 4, or 5");
+  if (!/^[45]\./.test(vitestVersion)) throw new Error("root pnpm importer must pin Vitest 4 or 5");
   const vitestPackage = document.packages?.[`vitest@${vitestVersion}`] ?? document.packages?.[`/vitest@${vitestVersion}`];
   if (!/^sha512-[A-Za-z0-9+/=]+$/.test(String(vitestPackage?.resolution?.integrity ?? ""))) {
     throw new Error("pnpm lockfile must pin the root Vitest package with sha512 integrity");
@@ -147,9 +148,9 @@ const require = createRequire('/repo/package.json');
 const { startVitest } = await import(require.resolve('vitest/node'));
 const { configDefaults } = await import(require.resolve('vitest/config'));
 const [selection, regression] = process.argv.slice(2);
-const options = { root:'/repo',run:true,watch:false,cache:false,fsModuleCache:false,configLoader:'runner',pool:'forks',isolate:true,fileParallelism:false,maxWorkers:1,reporters:['/vouch/reporter.mjs'] };
+const options = { root:'/repo',config:false,run:true,watch:false,cache:false,fsModuleCache:false,pool:'forks',isolate:true,fileParallelism:false,maxWorkers:1,reporters:['/vouch/reporter.mjs'] };
 if(selection === 'regression') { options.include = [regression]; options.exclude = [...configDefaults.exclude]; }
-const ctx = await startVitest('test', selection === 'regression' ? [regression] : [], options, {cacheDir:'/tmp/vite-cache'});
+const ctx = await startVitest('test', selection === 'regression' ? [regression] : [], options, {configFile:false,envDir:false,cacheDir:'/tmp/vite-cache',css:{postcss:{plugins:[]}}});
 await ctx?.close();
 const exitCode = process.exitCode ?? 0;
 process.removeAllListeners('beforeExit');
@@ -314,12 +315,13 @@ export class DockerProjectRunner implements ProjectTestRunner {
     if (result.exitCode !== 0 || result.timedOut || result.cancelled) throw new Error(`dependency setup ${result.cancelled ? "cancelled" : result.timedOut ? "timed out" : "failed"}: ${result.stderr.slice(-4000)}`);
     if (!existsSync(join(setup, "node_modules", "vitest", "vitest.mjs"))) throw new Error("dependency setup did not install the declared Vitest runner");
     const installed = JSON.parse(readBoundedRegularFile(join(setup, "node_modules", "vitest", "package.json"), MAX_METADATA_BYTES, "installed Vitest package.json").toString("utf8")) as { name?: string; version?: string };
-    if (installed.name !== "vitest" || !/^[345]\./.test(installed.version ?? "")) throw new Error("MVP structured verification requires the official Vitest 3, 4, or 5 package with Vite 6.1 or newer");
+    if (installed.name !== "vitest" || !/^[45]\./.test(installed.version ?? "")) throw new Error("MVP structured verification requires the official Vitest 4 or 5 package with Vite 6.1 or newer");
     const vite = JSON.parse(readBoundedRegularFile(join(setup, "node_modules", "vite", "package.json"), MAX_METADATA_BYTES, "installed Vite package.json").toString("utf8")) as { name?: string; version?: string };
     const [viteMajor = 0, viteMinor = 0] = (vite.version ?? "").split(".").map(Number);
     if (vite.name !== "vite" || viteMajor < 6 || (viteMajor === 6 && viteMinor < 1)) throw new Error("MVP structured verification requires the official Vite 6.1 or newer package");
     this.runtimeData = {
       adapter: "vitest",
+      repositoryConfig: "disabled",
       image: this.image,
       lockfile,
       lockfileHash: createHash("sha256").update(lockfileBytes).digest("hex"),

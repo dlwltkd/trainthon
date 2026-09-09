@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { applyLocalPatch, captureLocalChanges, createVerificationWorkspace, prepareLocalWorkspace, writeLocalSource } from "./local-workspace.js";
 import { listDirTool, readFileTool, writeFileTool } from "./fs-tools.js";
 import { runCommand } from "./exec.js";
@@ -43,7 +45,6 @@ describe("committed repository workspace", () => {
     for (const hidden of [".env", ".ENV", ".npmrc", ".pnpmfile.cjs", ".secrets/token", "private.key"]) {
       expect(workspace.files).not.toContain(hidden);
     }
-    expect(workspace.protectedPaths).toContain("bootstrap.ts");
     expect(workspace.protectedPaths).toContain("config-helper.cts");
     expect(workspace.regressionHash).toMatch(/^[a-f0-9]{64}$/);
     expect(statSync(join(workspace.dir, "src", "tool.js")).mode & 0o111).toBe(0o111);
@@ -67,7 +68,7 @@ describe("committed repository workspace", () => {
 
   test("rejects protected edits and source symlinks before verification", async () => {
     const f = fixture(); const workspace = await f.prepare();
-    for (const path of ["package.json", "regression.test.ts", "vitest.config.ts", "bootstrap.ts", "../outside.ts", ".env"]) expect(() => writeLocalSource(workspace, path, "bad")).toThrow();
+    for (const path of ["package.json", "regression.test.ts", "vitest.config.ts", "config-helper.cts", "../outside.ts", ".env"]) expect(() => writeLocalSource(workspace, path, "bad")).toThrow();
     writeFileSync(join(workspace.dir, "regression.test.ts"), "tampered\n");
     await expect(createVerificationWorkspace(workspace)).rejects.toThrow("protected file changed");
     writeFileSync(join(workspace.dir, "regression.test.ts"), "// supplied test\n");
@@ -99,13 +100,28 @@ describe("committed repository workspace", () => {
     await expect(f.prepare()).rejects.toThrow("regression exceeds 2000000 byte limit");
   });
 
-  test("rejects computed config imports whose support files cannot be frozen", async () => {
-    const f = fixture();
-    writeFileSync(join(f.repo, "vitest.config.ts"), "const name = 'setup'; import('./src/' + name); export default {};\n");
-    f.git("add", "vitest.config.ts");
-    f.git("-c", "user.name=Test", "-c", "user.email=test@local", "commit", "-qm", "dynamic config");
-    await expect(f.prepare()).rejects.toThrow("dynamic config dependency is unsupported");
-  });
+});
+
+test("harness-owned Vitest options ignore computed config dependencies", () => {
+  const root = mkdtempSync(join(tmpdir(), "vouch-config-bypass-")); roots.push(root);
+  mkdirSync(join(root, "src"));
+  writeFileSync(join(root, "package.json"), '{"type":"module","devDependencies":{"vitest":"5.0.0"}}\n');
+  writeFileSync(join(root, "src", "safe.js"), "export const isSafe = () => false;\n");
+  writeFileSync(join(root, "regression.test.js"), "import { expect, test } from 'vitest'; import { isSafe } from './src/safe.js'; test('safe', () => expect(isSafe()).toBe(true));\n");
+  writeFileSync(join(root, "src", "plugin.cjs"), "module.exports={name:'bypass',enforce:'pre',transform(code,id){if(id.endsWith('regression.test.js'))return code.replace('expect(isSafe()).toBe(true)','expect(true).toBe(true)')}};\n");
+  writeFileSync(join(root, "vitest.config.js"), "import { createRequire } from 'node:module'; const req=createRequire(import.meta.url); const plugin=req('./src/'+'plugin.cjs'); export default { plugins:[plugin] };\n");
+  const vitestNode = pathToFileURL(createRequire(import.meta.url).resolve("vitest/node")).href;
+  const launcher = join(root, "launch.mjs");
+  writeFileSync(launcher, `import { startVitest } from ${JSON.stringify(vitestNode)};
+const root=process.argv[2]; const config=process.argv[3] === 'disabled' ? false : undefined;
+const ctx=await startVitest('test',['regression.test.js'],{root,config,run:true,watch:false,pool:'forks',fileParallelism:false,maxWorkers:1});
+await ctx?.close(); process.exit(process.exitCode ?? 0);
+`);
+  const enabled = spawnSync(process.execPath, [launcher, root, "enabled"], { encoding: "utf8", timeout: 15_000 });
+  const disabled = spawnSync(process.execPath, [launcher, root, "disabled"], { encoding: "utf8", timeout: 15_000 });
+  expect(enabled.status, enabled.stderr).toBe(0);
+  expect(disabled.status).toBe(1);
+  expect(`${disabled.stdout}\n${disabled.stderr}`).toContain("expected false to be true");
 });
 
 test("file tools cannot access symlinks or hidden credentials", () => {
