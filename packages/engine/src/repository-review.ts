@@ -42,10 +42,6 @@ function message(error: unknown): string {
 export async function executeRepositoryReview(input: ExecuteRepositoryReviewOptions) {
   const options = Object.freeze({ ...input, model: Object.freeze({ ...input.model }), ...(input.reviewModel ? { reviewModel: Object.freeze({ ...input.reviewModel }) } : {}), budgets: Object.freeze({ ...input.budgets }) });
   const workflow = options.remediate ? "repository_remediation" : "repository_review";
-  const reviewHandoffAfter = options.reviewModel ? {
-    tokens: Math.max(1, Math.floor(options.budgets.maxTokens * 0.3)),
-    steps: Math.min(8, Math.max(1, Math.floor(options.budgets.maxSteps / 3))),
-  } : undefined;
   const runId = `${basename(options.repoPath).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 70) || "repository"}__review__${Date.now()}__${randomUUID().slice(0, 8)}`;
   const dir = resolve(options.runsDir, runId);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -54,7 +50,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   const startedAt = Date.now();
   let configHash = "invalid-config";
   let configError: unknown;
-  try { configHash = hash(JSON.stringify({ workflow, repo: options.repoPath, ref: options.ref ?? "HEAD", prompt: options.prompt, report: options.report ?? "", model: canonicalizeModelSpec(options.model), ...(options.reviewModel ? { reviewModel: canonicalizeModelSpec(options.reviewModel), reviewHandoffAfter } : {}), budgets: options.budgets, seed: options.seed })); }
+  try { configHash = hash(JSON.stringify({ workflow, repo: options.repoPath, ref: options.ref ?? "HEAD", prompt: options.prompt, report: options.report ?? "", model: canonicalizeModelSpec(options.model), ...(options.reviewModel ? { reviewModel: canonicalizeModelSpec(options.reviewModel) } : {}), budgets: options.budgets, seed: options.seed })); }
   catch (error) { configError = error; }
   logger.emit({ type: "run_start", runKind: "local_repository", workflow, configHash, mode: "live", model: options.model.model, seed: options.seed, budgets: options.budgets });
   let budget: RunBudget | undefined;
@@ -112,7 +108,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
       status = "INFRA_ERROR"; invoked = true;
       const reviewed = await reviewer.run({
         system: systemPromptRepositoryReview("red"), prompt, tools: reviewToolset.tools,
-        budgets: options.budgets, budget, model: options.reviewModel.model, seed: options.seed, role: "red", stage, maxOutputTokens: 4096, handoffAfter: reviewHandoffAfter,
+        budgets: options.budgets, budget, model: options.reviewModel.model, seed: options.seed, role: "red", stage,
         onEvent: emitAgentEvent,
       });
       await reviewToolset.drain(); budget.assertActive();
@@ -188,7 +184,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     startedAt, endedAt, elapsedMs: endedAt - startedAt, costUsd: invoked ? null : 0,
     seed: options.seed, budgets: options.budgets, usage: budget?.usage ?? { inputTokens: 0, outputTokens: 0, steps: 0 }, usageKnown: budget?.usageKnown ?? true,
     repository: { name: source?.name ?? basename(options.repoPath), url: source?.url, requestedRef: options.ref ?? "HEAD", commit: workspace?.commit ?? null, files: workspace?.files.length ?? 0 },
-    model: options.model, ...(options.reviewModel ? { reviewModel: options.reviewModel, reviewSummary, ...(reviewStatus ? { reviewStatus } : {}), reviewHandoffAfter } : {}), verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged: status === "PATCH_PROPOSED" },
+    model: options.model, ...(options.reviewModel ? { reviewModel: options.reviewModel, reviewSummary, ...(reviewStatus ? { reviewStatus } : {}) } : {}), verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged: status === "PATCH_PROPOSED" },
     findings: [...recordedFindings.values()], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },
     ...(delivery ? { delivery } : {}), artifacts,
   };

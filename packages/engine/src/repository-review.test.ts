@@ -91,7 +91,8 @@ describe("prompt-driven source review", () => {
       reviewRunner: { run: async input => {
         phases.push(input.role!); sharedBudget = input.budget;
         expect(input.system).toContain("You are Red");
-        expect(input.handoffAfter).toEqual({ tokens: 9000, steps: 3 });
+        expect(input.handoffAfter).toBeUndefined();
+        expect(input.maxOutputTokens).toBeUndefined();
         return new ScriptedRunner(async tools => {
           for (const name of ["write_file", "edit_file", "inspect_diff", "run_regression", "shell", "fetch"]) expect(tools[name]).toBeUndefined();
           await startReview(tools);
@@ -126,7 +127,7 @@ describe("prompt-driven source review", () => {
     expect(record.reviewModel).toEqual(reviewModel);
     expect(record.reviewSummary).toContain("Red observed subtraction");
     expect(record.reviewStatus).toBe("complete");
-    expect(record.reviewHandoffAfter).toEqual({ tokens: 9000, steps: 3 });
+    expect(record).not.toHaveProperty("reviewHandoffAfter");
     expect(record.usage.steps).toBe(2);
     expect(record.findings.map(finding => [finding.agentRole, finding.findingId])).toEqual([["red", "addition"], ["blue", "addition"]]);
     expect(record.changes.findingIdsByFile).toEqual({ "src/add.ts": ["addition"] });
@@ -203,7 +204,7 @@ describe("prompt-driven source review", () => {
     assertFinal(record, f);
   });
 
-  it.each(["read", "search"])("accepts Red's bounded handoff from an actual %s without inventing a final progress event", async sourceTool => {
+  it.each(["read", "search"])("accepts Red's handoff from an actual %s without inventing a final progress event", async sourceTool => {
     const f = fixture();
     const record = await executeRepositoryReview({
       ...f.options, reviewModel,

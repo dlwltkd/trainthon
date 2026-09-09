@@ -126,7 +126,8 @@ describe("source review and remediation skills", () => {
 
   test("separates Red's read-only discovery from Blue's independent source validation", () => {
     expect(systemPromptRepositoryReview("red")).toContain("You are Red, the source reviewer");
-    expect(systemPromptRepositoryReview("red")).toContain("within the assigned review allowance");
+    expect(systemPromptRepositoryReview("red")).toContain("Complete the relevant source investigation before returning your final handoff");
+    expect(systemPromptRepositoryReview("red")).not.toContain("early final handoff");
     expect(systemPromptRepositoryReview()).toContain("supported, rejected, or unresolved");
     expect(systemPromptRepositoryRepair()).toContain("Record your own supported finding before editing");
     expect(systemPromptRepositoryRepair()).toContain("bounded read_file line ranges");

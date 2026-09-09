@@ -175,10 +175,10 @@ File reads and searches return bounded pages with continuation positions. Large
 files can be changed through an exact, unique `edit_file` replacement instead of
 rewriting their full contents. Prompt workflows do not impose a cumulative
 token ceiling across both roles, including conservative accounting when
-a gateway omits usage. Red is asked to finish its investigation after 30% of that
-allowance or eight model steps, then make a final handoff within the shared run.
-This leaves capacity for Blue; the handoff must disclose unread source and
-unresolved questions. Existing-test and benchmark workflows retain their
+a gateway omits usage. Red investigates the requested source paths and returns
+its handoff when finished; there is no separate Red token or step cutoff.
+The shared 40-step and eight-minute run limits still apply. The handoff must
+disclose unread source and unresolved questions. Existing-test and benchmark workflows retain their
 200,000-token default. Before each model request, the harness
 also reserves a conservative allowance for its context and output. A request
 can exceed that allowance while recorded usage remains below the limit; this is
