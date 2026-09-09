@@ -4,10 +4,13 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.3",
-  "scripts": {
-    "cli": "tsx apps/cli/src/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
-  },
+    "scripts": {
+      "cli": "tsx apps/cli/src/index.ts",
+      "typecheck": "tsc --noEmit -p tsconfig.json",
+      "test": "vitest run",
+      "dev": "pnpm --parallel --filter @vouch/server --filter @vouch/dashboard dev",
+      "server": "tsx apps/server/src/index.ts"
+    },
   "devDependencies": {
     "@types/node": "^26.5.0",
     "tsx": "^4.19.2",

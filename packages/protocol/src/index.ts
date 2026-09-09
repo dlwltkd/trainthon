@@ -204,3 +204,43 @@ export const DEFAULT_BUDGETS: Budgets = {
   maxSteps: 40,
   maxWallMs: 8 * 60_000,
 };
+
+/** One condition's aggregated scores over a bench set. */
+export interface BenchCell {
+  condition: Condition;
+  n: number;
+  nVuln: number;
+  nControl: number;
+  verifiedFix: number;
+  verifiedFixRate: number;
+  overFix: number;
+  overFixRate: number;
+  brokeFunction: number;
+  notReproducible: number;
+  infraError: number;
+  meanElapsedMs: number;
+  totalCostUsd: number;
+}
+
+export interface BenchRunRow {
+  runId: string;
+  taskId: string;
+  kind: TaskKind;
+  condition: Condition;
+  status: RunStatus;
+  elapsedMs: number | null;
+  costUsd: number;
+  metrics: GradeMetrics | null;
+  scripted: boolean;
+}
+
+export interface BenchReport {
+  split: Split;
+  repeats: number;
+  conditions: Condition[];
+  cells: BenchCell[];
+  runs: BenchRunRow[];
+  generatedAt: number;
+  /** True when any run used a scripted (no-key) runner — not a model score. */
+  scripted: boolean;
+}

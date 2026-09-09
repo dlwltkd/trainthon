@@ -127,8 +127,8 @@ injection 등).
 | M0 ✅ | 0–1h | 모노레포+protocol+이벤트 로거+CLI. `cli run --task hello --condition B`가 올바른 JSONL run 기록 생성 |
 | M1 ✅ | 1–3h | sandbox worktree + 도구 + 모델 루프(B). 기본 에이전트가 취약 fixture 수정, grader가 FIXED_VERIFIED |
 | M2 ✅ | 3–5h | harness(C) + Red/Blue + 게이트. C가 V 하나 수정 AND 대조 하나 정답(diff=0). = P0 완료 — `proto-pollution` C→FIXED_VERIFIED, `proto-pollution-fixed` C→NOT_REPRODUCIBLE(diff 0), 스크립트 러너로 검증. 실모델 검증은 키 투입 후 |
-| M3 | 5–7h | SSE + Run 뷰 + replay |
-| M4 | 7–9h | bench 러너 + dev 4개 + 지표. `cli bench --set dev` 지표 표 |
+| M3 ✅ | 5–7h | SSE + Run 뷰 + replay — `vouch replay`, Hono `/api/runs/:id/events`, dashboard Studio |
+| M4 ✅ | 7–9h | bench 러너 + dev 4개 + 지표. `cli bench --set dev` 지표 표 |
 | M5 | 9–13h | eval 8(실제 CVE 2 fork 포함) + prereg 커밋 + 48회 + 결과 표·차트 + fork draft PR URL |
 | M6 | 13h+ | 실제-CVE 성공 저널 녹화, 통제앱 라이브 리허설, 영상, 발표 |
 

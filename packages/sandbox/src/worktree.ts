@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runCommand } from "./exec.js";
 
@@ -40,6 +40,11 @@ export async function createWorktree(
     throw new Error(`worktree source not found: ${src}`);
   }
   cpSync(src, dir, { recursive: true });
+
+  writeFileSync(
+    join(dir, ".gitignore"),
+    ["node_modules/", ".vite/", "coverage/", "*.log", ""].join("\n"),
+  );
 
   const t = 20_000;
   await runCommand("git", ["init", "-q"], { cwd: dir, timeoutMs: t });

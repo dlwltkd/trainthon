@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type {
   Condition,
   GradeMetrics,
+  HarnessEvent,
   RunConfig,
   RunRecord,
   RunStatus,
@@ -53,11 +54,15 @@ export interface ExecuteRunOptions {
   runsDir: string;
   repoRoot: string;
   benchDir: string;
+  /** Override the generated id (server uses this so SSE can subscribe first). */
+  runId?: string;
+  /** Live subscriber (SSE). The JSONL file remains the source of truth. */
+  onEvent?: (event: HarnessEvent) => void;
 }
 
 const STEP_TIMEOUT_MS = 60_000;
 
-function makeRunId(taskId: string, condition: Condition, seed: number): string {
+export function makeRunId(taskId: string, condition: Condition, seed: number): string {
   return `${taskId}__${condition}__seed${seed}__${Date.now()}`;
 }
 
@@ -152,6 +157,16 @@ export function selectRunner(
   if (base) return base;
   const scripted = scriptedRunner(role, task, benchDir);
   if (scripted) return scripted;
+  if (role !== "red") {
+    return {
+      runner: new ScriptedRunner(async (tools) => {
+        if (tools["run_tests"]) await tools["run_tests"]({});
+        return "no scripted artifact; public tests only";
+      }),
+      model: "scripted",
+      label: "scripted-noop",
+    };
+  }
   throw new Error(
     `no model API key (set ANTHROPIC_API_KEY or OPENAI_API_KEY) and no scripted ${role} artifact for task ${task.id}`,
   );
@@ -319,8 +334,8 @@ async function runHarness(ctx: RunContext): Promise<Outcome> {
 
 export async function executeRun(opts: ExecuteRunOptions): Promise<RunRecord> {
   const { task, config, runsDir, repoRoot, benchDir } = opts;
-  const runId = makeRunId(task.id, config.condition, config.seed);
-  const logger = new EventLogger(runId, join(runsDir, `${runId}.jsonl`));
+  const runId = opts.runId ?? makeRunId(task.id, config.condition, config.seed);
+  const logger = new EventLogger(runId, join(runsDir, `${runId}.jsonl`), opts.onEvent);
   const hash = configHash(config, task.id);
   const startedAt = Date.now();
   const extraPath = resolve(repoRoot, "node_modules/.bin");

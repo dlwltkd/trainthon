@@ -42,3 +42,13 @@ pnpm cli run --task hello --condition B   # writes runs/<runId>.jsonl
 ```
 
 Requires Node 22+ and pnpm.
+
+```bash
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm cli run --task proto-pollution --condition C
+pnpm cli replay --run <runId>
+pnpm cli bench --set dev
+pnpm dev   # dashboard :5173  +  server :8787
+```

@@ -1,0 +1,7 @@
+{
+  "exploitFile": "exploit.test.ts",
+  "exploitDest": "exploit.test.ts",
+  "exploitCmd": "vitest run exploit.test.ts",
+  "functionalCmd": "vitest run src/join.test.ts",
+  "guardedPaths": []
+}
