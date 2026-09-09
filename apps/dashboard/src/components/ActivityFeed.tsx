@@ -291,7 +291,7 @@ function Row({ id, icon, accent, children, className, last = false }: { id?: str
 function toolIcon(name: string): ReactNode {
   if (name === "grep" || name === "search") return <Search className="size-3.5" />;
   if (name.startsWith("run_") || name === "submit_repro") return <FlaskConical className="size-3.5" />;
-  if (name === "write_file" || name === "apply_patch" || name === "apply_supplied_patch") return <FileDiff className="size-3.5" />;
+  if (name === "write_file" || name === "edit_file" || name === "apply_patch" || name === "apply_supplied_patch") return <FileDiff className="size-3.5" />;
   if (name === "run_cmd") return <Terminal className="size-3.5" />;
   return <Wrench className="size-3.5" />;
 }
@@ -308,6 +308,7 @@ function shortResult(item: ToolCallItem): string | undefined {
   if (item.error) return item.error;
   const result = item.result;
   if (result === undefined) return undefined;
+  if (item.name === "read_file" && item.truncated) return "source excerpt";
   if (typeof result === "string") return result.split("\n")[0]?.slice(0, 120);
   if (typeof result === "object" && result !== null) {
     const r = result as Record<string, unknown>;
@@ -315,7 +316,7 @@ function shortResult(item: ToolCallItem): string | undefined {
     if (typeof r.passed === "boolean") return r.passed ? "passed" : "failed";
     if (typeof r.failsNow === "boolean") return r.failsNow ? "fails on current code" : "does not fail";
     if (r.ok === true) return "ok";
-    if (typeof r.content === "string") return `${r.content.split("\n").length} lines`;
+    if (typeof r.content === "string") return `${r.content.replace(/\n$/, "").split("\n").length} lines`;
     if (Array.isArray(r.entries)) return `${r.entries.length} entries`;
     if (Array.isArray(r.matches)) return `${r.matches.length} matches`;
     if (Array.isArray(result)) return `${result.length} items`;
@@ -327,7 +328,7 @@ function ToolRow({ item, actions, now, live }: { item: ToolCallItem; actions: Fe
   const [open, setOpen] = useState(false);
   const running = item.outcome === "running";
   const duration = running ? Math.max(0, (live ? now : item.ts) - item.ts) : item.durationMs;
-  const canOpenFile = Boolean(item.target && (item.name === "read_file" || item.name === "write_file" || item.name === "apply_patch"));
+  const canOpenFile = Boolean(item.target && ["read_file", "write_file", "edit_file", "apply_patch"].includes(item.name));
   const result = shortResult(item);
 
   return (
@@ -385,7 +386,7 @@ function ExploreGroup({ items, actions, role }: { items: ToolCallItem[]; actions
   const searches = items.filter((i) => i.name === "grep" || i.name === "search").length;
   const lists = items.filter((i) => i.name === "list_dir").length;
   const parts = [reads && `${reads} read${reads === 1 ? "" : "s"}`, searches && `${searches} search${searches === 1 ? "" : "es"}`, lists && `${lists} listing${lists === 1 ? "" : "s"}`].filter(Boolean);
-  const total = items.reduce((sum, i) => sum + (i.durationMs ?? 0), 0);
+  const elapsed = Math.max(...items.map(i => i.ts + (i.durationMs ?? 0))) - Math.min(...items.map(i => i.ts));
   const failed = items.filter((i) => i.outcome === "failed").length;
 
   return (
@@ -393,9 +394,9 @@ function ExploreGroup({ items, actions, role }: { items: ToolCallItem[]; actions
       <button onClick={() => setOpen((v) => !v)} className="flex w-full flex-col items-start gap-0.5 text-left" aria-expanded={open}>
         <div className="flex w-full items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate font-medium">
-            Explored {files.size} file{files.size === 1 ? "" : "s"}
+            {searches || lists ? "Explored source" : `Read ${files.size} file${files.size === 1 ? "" : "s"}`}
           </span>
-          <span className="secondary font-mono text-[0.8em] tabular-nums text-ink-3">{formatDuration(total)}</span>
+          <span className="secondary font-mono text-[0.8em] tabular-nums text-ink-3">{formatDuration(elapsed)}</span>
           {failed ? <X className="size-3.5 text-fail" strokeWidth={3} /> : <Check className="size-3.5 text-pass" strokeWidth={3} />}
         </div>
         <div className="flex w-full items-center gap-1.5 text-[0.85em] text-ink-3">
