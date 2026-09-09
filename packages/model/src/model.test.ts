@@ -137,6 +137,24 @@ describe("RunBudget", () => {
 });
 
 describe("SdkRunner", () => {
+  it("refreshes public progress after several turns and restores all investigation tools afterward", async () => {
+    const progressReply = (id: string) => reply([{ type: "tool-call", toolCallId: id, toolName: "report_progress", input: "{}" }]);
+    const model = new MockLanguageModelV2({ doGenerate: [progressReply("initial"), toolReply("read_file", "read-1"), toolReply("read_file", "read-2"), progressReply("checkpoint"), toolReply("read_file", "read-3"), reply()] });
+    const run = input(budget({ maxSteps: 10, maxTokens: 100_000 }));
+    const read = vi.fn(async () => "Observed fixture source.");
+    run.tools = [fileTool(read), { name: "report_progress", description: "Publish a public progress update", schema: z.object({}), execute: async () => ({ recorded: true }) }];
+    run.requestPolicy = { maxRetries: 0, timeoutMs: 2_000, progressEverySteps: 2 };
+    const result = await new SdkRunner(() => model).run(run);
+    expect(result.finalText).toBe("Done");
+    expect(read).toHaveBeenCalledTimes(3);
+    const checkpoint = model.doGenerateCalls[3]!;
+    expect(checkpoint.toolChoice).toEqual({ type: "tool", toolName: "report_progress" });
+    expect(checkpoint.tools?.map(tool => tool.name)).toEqual(["report_progress"]);
+    expect(model.doGenerateCalls[4]!.tools?.map(tool => tool.name)).toEqual(["read_file", "report_progress"]);
+    expect(model.doGenerateCalls[4]!.prompt[0]).toMatchObject({ role: "system", content: run.system });
+    expect(run.events.some(event => event.type === "action_summary" && event.summary.includes("Investigation allowance"))).toBe(false);
+  });
+
   it("announces a model request before entering the provider transport", async () => {
     const run = input();
     const model = new MockLanguageModelV2({ doGenerate: async () => {

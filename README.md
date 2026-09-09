@@ -196,6 +196,9 @@ twice per request. Responses are streamed, with a 90-second inactivity deadline.
 Active streams can continue within the shared run deadline. The timeline shows
 waiting, receiving, tool preparation, first-response latency, and retry countdowns.
 Only execution metadata and public decision summaries are displayed.
+After six model steps without a successful progress update, the harness requests
+an updated public summary and evidence through `report_progress`, then restores
+the investigation tools. This checkpoint does not end Red's investigation.
 Tool calls execute after a complete response; interrupted streams cannot execute
 partially received tools. Retries retain completed
 tool results and count toward the shared run limits; they do not restart the

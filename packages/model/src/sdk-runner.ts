@@ -93,6 +93,7 @@ export class SdkRunner implements AgentRunner {
     let inputTokens = 0;
     let outputTokens = 0;
     let steps = 0;
+    let lastProgressStep: number | undefined;
     try {
       budget.check();
       const outputLimit = input.maxOutputTokens ?? 8192;
@@ -100,6 +101,7 @@ export class SdkRunner implements AgentRunner {
       if (input.handoffAfter && ![input.handoffAfter.tokens, input.handoffAfter.steps].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error("handoffAfter allowances must be positive safe integers");
       const policy = input.requestPolicy;
       if (policy && (!Number.isSafeInteger(policy.maxRetries) || policy.maxRetries < 0 || policy.maxRetries > 3 || !Number.isSafeInteger(policy.timeoutMs) || policy.timeoutMs <= 0 || policy.transport !== undefined && !["stream", "generate"].includes(policy.transport))) throw new Error("requestPolicy requires 0–3 retries, a positive timeout, and a supported transport");
+      if (policy?.progressEverySteps !== undefined && (!Number.isSafeInteger(policy.progressEverySteps) || policy.progressEverySteps < 1 || policy.progressEverySteps > 20)) throw new Error("progressEverySteps must be an integer from 1 to 20");
       const resolved = this.resolve(input.model);
       if (typeof resolved === "string") throw new Error("ModelResolver must return an explicit provider model");
       const model = wrapLanguageModel({
@@ -220,7 +222,11 @@ export class SdkRunner implements AgentRunner {
         tools[spec.name] = tool({
           description: spec.description,
           inputSchema: spec.schema,
-          execute: (args: unknown, options) => executeLoggedTool(input, budget, spec, args, options.toolCallId),
+          execute: async (args: unknown, options) => {
+            const result = await executeLoggedTool(input, budget, spec, args, options.toolCallId);
+            if (spec.name === "report_progress") lastProgressStep = steps;
+            return result;
+          },
         });
       }
       const result = await withCancellation(generateText({
@@ -234,6 +240,15 @@ export class SdkRunner implements AgentRunner {
         abortSignal: budget.signal,
         maxOutputTokens: Math.min(outputLimit, budget.remainingTokens),
         prepareStep: () => {
+          if (policy?.progressEverySteps && lastProgressStep !== undefined && steps - lastProgressStep >= policy.progressEverySteps && tools.report_progress) {
+            budget.check();
+            input.onEvent({ type: "action_summary", summary: "Refreshing the public decision summary and source evidence", ...eventContext(input) });
+            return {
+              activeTools: ["report_progress"],
+              toolChoice: { type: "tool", toolName: "report_progress" },
+              system: `${input.system}\n\nProgress checkpoint: publish an updated public summary, observed evidence paths, and honest plan status with report_progress. State what the inspected source supports and which question remains. Keep private reasoning private. Repository tools return in the following response so you can continue the investigation.`,
+            };
+          }
           if (!input.handoffAfter || steps === 0 || (steps < input.handoffAfter.steps && inputTokens + outputTokens < input.handoffAfter.tokens)) return;
           budget.check();
           input.onEvent({ type: "action_summary", summary: "Investigation allowance reached; preparing a source handoff with the evidence already observed.", ...eventContext(input) });
