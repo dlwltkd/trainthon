@@ -1,9 +1,21 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { SdkRunner } from "./sdk-runner.js";
 import type { AgentRunner } from "./types.js";
 
 export type ProviderName = "anthropic" | "openai";
+
+/** Any provider selectable for a run or a harness role. */
+export type ProviderKind = ProviderName | "compatible";
+
+/** Base URLs for known OpenAI-compatible gateways. */
+export const GATEWAYS = {
+  routeway: "https://api.routeway.ai/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  vercel: "https://ai-gateway.vercel.sh/v1",
+  zai: "https://api.z.ai/api/paas/v4",
+} as const;
 
 export interface ProviderInfo {
   name: ProviderName;
@@ -34,6 +46,26 @@ export function createOpenAIRunner(apiKey: string): AgentRunner {
   return new SdkRunner(createOpenAI({ apiKey }));
 }
 
+/**
+ * Runner for any OpenAI-compatible gateway (Routeway, Vercel AI Gateway,
+ * OpenRouter, z.ai, ...). One abstraction covers every gateway and unlocks
+ * models a native provider does not expose — including less-restricted models
+ * useful for the harness Red (attack) role, which safety-tuned frontier models
+ * often refuse to run.
+ */
+export function createCompatibleRunner(opts: {
+  apiKey: string;
+  baseURL: string;
+  name?: string;
+}): AgentRunner {
+  const provider = createOpenAICompatible({
+    name: opts.name ?? "compatible",
+    apiKey: opts.apiKey,
+    baseURL: opts.baseURL,
+  });
+  return new SdkRunner((modelId: string) => provider(modelId));
+}
+
 export function createRunner(provider: ProviderName, apiKey: string): AgentRunner {
   switch (provider) {
     case "anthropic":
@@ -41,6 +73,39 @@ export function createRunner(provider: ProviderName, apiKey: string): AgentRunne
     case "openai":
       return createOpenAIRunner(apiKey);
   }
+}
+
+/** A fully-specified model choice for a run or a harness role. */
+export interface ModelSpec {
+  provider: ProviderKind;
+  model: string;
+  /** For `compatible`: the gateway base URL. Defaults to Routeway. */
+  baseURL?: string;
+  /** Env var holding the API key. Defaults to the provider's standard var. */
+  apiKeyEnv?: string;
+}
+
+function apiKeyEnvFor(spec: ModelSpec): string {
+  if (spec.apiKeyEnv) return spec.apiKeyEnv;
+  if (spec.provider === "compatible") return "ROUTEWAY_API_KEY";
+  return PROVIDERS[spec.provider].apiKeyEnv;
+}
+
+/** Build a runner from a spec, or null when its API key is absent. */
+export function createRunnerForSpec(
+  spec: ModelSpec,
+  env: NodeJS.ProcessEnv = process.env,
+): AgentRunner | null {
+  const key = env[apiKeyEnvFor(spec)];
+  if (!key) return null;
+  if (spec.provider === "compatible") {
+    return createCompatibleRunner({
+      apiKey: key,
+      baseURL: spec.baseURL ?? GATEWAYS.routeway,
+      name: "gateway",
+    });
+  }
+  return createRunner(spec.provider, key);
 }
 
 /** Infer the provider from a model id when one is not given explicitly. */
