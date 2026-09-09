@@ -119,7 +119,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
       budget.check();
       logger.emit({ type: "guidance_configured", ...REPOSITORY_REVIEW_GUIDANCE, agentRole: "red" });
       logger.emit({ type: "role_assigned", role: "red", runner: "source-review", provider: options.reviewModel.provider, model: options.reviewModel.model });
-      reviewToolset = buildSourceReviewTools(workspace, budget.signal, emitAgentEvent, false, "red");
+      reviewToolset = buildSourceReviewTools({ ...workspace, dir: workspace.baselineDir }, budget.signal, emitAgentEvent, false, "red");
       status = "INFRA_ERROR"; invoked = true;
       try {
         const reviewed = await reviewer.run({

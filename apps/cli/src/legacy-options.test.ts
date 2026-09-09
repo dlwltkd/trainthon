@@ -160,13 +160,36 @@ describe("run CLI options", () => {
     } });
   });
 
-  it("defaults Red to the pinned Routeway model", () => {
+  it("defaults both roles to the same OpenAI model", () => {
     expect(parseRunOptions(repository, {})).toMatchObject({
+      model: { model: "gpt-5.6-sol", provider: "openai" },
       reviewModel: {
-        model: "glm-5.3-flash-uncensored",
-        provider: "compatible",
+        model: "gpt-5.6-sol",
+        provider: "openai",
       },
     });
+  });
+
+  it("keeps the default reviewer on Blue's exact provider configuration", () => {
+    const options = parseRunOptions({
+      ...repository, model: "custom-model", provider: "compatible",
+      "base-url": "https://provider.example/v1", "api-key-env": "CUSTOM_KEY",
+    }, {});
+    expect(options.kind).toBe("repository");
+    if (options.kind !== "repository") throw new Error("expected repository options");
+    expect(options.reviewModel).toEqual(options.model);
+    expect(options.reviewModel).not.toBe(options.model);
+  });
+
+  it("infers an explicitly selected OpenAI reviewer without inheriting another gateway", () => {
+    const options = parseRunOptions({
+      ...repository, model: "custom-model", provider: "compatible",
+      "base-url": "https://provider.example/v1", "api-key-env": "CUSTOM_KEY",
+      "red-model": "gpt-5.6-sol",
+    }, {});
+    expect(options).toMatchObject({ reviewModel: {
+      model: "gpt-5.6-sol", provider: "openai", baseURL: undefined, apiKeyEnv: undefined,
+    } });
   });
 
   it("does not activate ambient live role configuration in scripted local mode", () => {

@@ -109,10 +109,10 @@ pnpm cli run \
 ```
 
 For live runs, copy the environment template and add the provider keys locally.
-Prompt workflows start with Red source discovery, defaulting to
-`glm-5.3-flash-uncensored` through Routeway. Blue, defaulting to `gpt-5.6-sol`
-through OpenAI, independently checks the reported source evidence and proposes
-changes when `--fix` is selected. Configure both provider keys; the live doctor
+Prompt workflows start with Red source discovery. Red and Blue both default to
+`gpt-5.6-sol` through OpenAI. Blue independently checks the reported source
+evidence and proposes changes when `--fix` is selected. Red inherits Blue's
+model and provider configuration unless explicitly overridden. The live doctor
 command probes both roles:
 
 ```bash
@@ -128,12 +128,9 @@ Daybreak access. [OpenAI model page](https://developers.openai.com/api/docs/mode
 
 `.env` is ignored by Git. Vouch accepts key-environment names rather than raw
 key flags, and it does not print key values in configuration or run logs. The
-Routeway Red role uses read-only tools to review evidence before Blue repairs
-the code. Its adapter sends `max_completion_tokens` and omits `seed`, which this
-exact GLM model does not advertise as supported. The adapter and connection
-check are implemented. Routeway currently returns null token counts for this
-model, so Vouch marks usage unknown and charges the full reserved token bound
-instead of reporting invented usage or cost.
+optional Routeway adapter remains available for explicitly selected models.
+When a provider omits token usage, Vouch marks usage unknown and accounts for
+the reserved token bound instead of inventing usage or cost.
 
 The CLI loads the root `.env` without overriding exported variables. Start a
 source review with a repository and prompt:

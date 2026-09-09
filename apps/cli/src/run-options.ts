@@ -1,7 +1,6 @@
 import type { Condition, ExecutionMode } from "@vouch/protocol";
 import {
   PROVIDERS,
-  ROUTEWAY_GLM_FLASH_UNCENSORED,
   providerForModel,
   type ModelSpec,
   type ProviderKind,
@@ -69,17 +68,23 @@ export function resolveLiveRoleModels(
 ): LiveRoleModels {
   const blue = resolveLiveBlueModel(flags, env);
   const redModel = configuredValue(flags, "red-model", env, "VOUCH_RED_MODEL")
-    || ROUTEWAY_GLM_FLASH_UNCENSORED;
+    || blue.model;
   const redProvider = configuredValue(flags, "red-provider", env, "VOUCH_RED_PROVIDER");
   const redBaseURL = configuredValue(flags, "red-base-url", env, "VOUCH_RED_BASE_URL");
   const redApiKeyEnv = configuredValue(flags, "red-api-key-env", env, "VOUCH_RED_API_KEY_ENV");
+  const selectedRedProvider = provider(
+    redProvider ?? (redModel === blue.model ? blue.provider : providerForModel(redModel) ?? "compatible"),
+    redModel,
+    "Red",
+  );
+  const sharesBlueProvider = redModel === blue.model && selectedRedProvider === blue.provider;
   return {
     blue,
     red: {
       model: redModel,
-      provider: provider(redProvider ?? "compatible", redModel, "Red"),
-      baseURL: redBaseURL,
-      apiKeyEnv: redApiKeyEnv,
+      provider: selectedRedProvider,
+      baseURL: redBaseURL ?? (sharesBlueProvider ? blue.baseURL : undefined),
+      apiKeyEnv: redApiKeyEnv ?? (sharesBlueProvider ? blue.apiKeyEnv : undefined),
     },
   };
 }

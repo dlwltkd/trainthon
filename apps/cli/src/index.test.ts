@@ -48,7 +48,7 @@ describe("run CLI result", () => {
 
       expect(engine.executeRepositoryReview).toHaveBeenCalledWith(expect.objectContaining({
         repoPath: repo, prompt: "Review authorization checks.", report: undefined, ref: "HEAD",
-        reviewModel: expect.objectContaining({ provider: "compatible", model: expect.any(String) }),
+        reviewModel: expect.objectContaining({ provider: "openai", model: "gpt-5.6-sol" }),
         budgets: DEFAULT_REPOSITORY_BUDGETS,
       }));
       expect(engine.executeLocalRun).not.toHaveBeenCalled();
