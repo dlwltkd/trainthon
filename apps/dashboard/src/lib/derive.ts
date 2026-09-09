@@ -6,6 +6,7 @@ import type {
   GateEvent,
   GradeMetrics,
   HarnessEvent,
+  ModelRequestEvent,
   RunStatus,
   TestRunEvent,
 } from "@vouch/protocol";
@@ -211,13 +212,30 @@ export type ActivityItem =
   | FindingItem
   | ChangeItem
   | EndItem
-  | GradeItem;
+  | GradeItem
+  | ModelRequestItem;
 
 export interface RoleInfo {
   role: AgentRole;
   runner: string;
   model?: string;
   provider?: string;
+}
+
+export interface ModelRequestItem extends ModelRequestEvent {
+  kind: "model";
+  id: string;
+}
+
+export function modelRequestLabel(request: ModelRequestItem): string {
+  switch (request.phase) {
+    case "waiting": return "Waiting for model response";
+    case "receiving": return "Receiving response";
+    case "tool_input": return request.toolName ? `Preparing ${request.toolName}` : "Preparing tool arguments";
+    case "retry_wait": return "Waiting to retry · tool results preserved";
+    case "completed": return "Model response received";
+    case "failed": return "Model request interrupted";
+  }
 }
 
 export interface RunView {
@@ -249,6 +267,7 @@ export interface RunView {
   currentDecision?: DecisionItem;
   activity: ActivityItem[];
   currentAction?: ToolCallItem;
+  currentModel?: ModelRequestItem;
   tools: Map<string, ToolCallItem>;
   inspectedFiles: Set<string>;
   changedFiles: Map<string, { patch: string; additions: number; deletions: number }>;
@@ -421,6 +440,7 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
     gates: {},
     eventCount: sorted.length,
   };
+  const requests = new Map<string, ModelRequestItem>();
 
   const stageIndex = (id: EngineState) => view.stages.findIndex((s) => s.id === id);
   const enter = (id: EngineState, ts: number) => {
@@ -477,6 +497,8 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
         });
         currentRole = event.role;
         view.currentRole = event.role;
+        view.currentDecision = undefined;
+        view.currentModel = undefined;
         break;
       }
       case "guidance_configured": {
@@ -514,6 +536,7 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
         break;
       }
       case "action_summary": {
+        if (!event.callId && view.currentModel && (event.summary === "Requesting the next model response" || event.summary.includes("Retrying this model request"))) break;
         if (event.callId) {
           const existing = view.tools.get(event.callId);
           if (existing) existing.summary = event.summary;
@@ -630,7 +653,20 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
       }
       case "model_msg": {
         view.usage.tokens += event.tokensIn + event.tokensOut;
-        if (event.role === "assistant") view.usage.modelTurns++;
+        if (event.role === "assistant" && event.outcome !== "failed") view.usage.modelTurns++;
+        break;
+      }
+      case "model_request": {
+        const id = `model-${event.requestId}-${event.attempt}`;
+        let item = requests.get(id);
+        if (!item) {
+          item = { ...event, kind: "model", id };
+          requests.set(id, item);
+          view.activity.push(item);
+        } else Object.assign(item, event, { ts: item.ts, seq: item.seq });
+        if (event.phase === "completed" || event.phase === "failed") {
+          if (view.currentModel?.id === id) view.currentModel = undefined;
+        } else view.currentModel = item;
         break;
       }
       case "budget_update": {
@@ -681,6 +717,13 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
   }
 
   if (view.endedAt !== undefined) {
+    view.currentModel = undefined;
+    for (const request of requests.values()) {
+      if (!["completed", "failed"].includes(request.phase)) {
+        request.phase = "failed";
+        request.detail = "Run ended before this request completed.";
+      }
+    }
     for (const tool of view.tools.values()) {
       if (tool.outcome === "running") tool.outcome = "unresolved";
     }

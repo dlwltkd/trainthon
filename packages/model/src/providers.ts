@@ -74,6 +74,7 @@ export function createCompatibleRunner(opts: {
     apiKey: normalizeSecret(opts.apiKey),
     baseURL,
     fetch: opts.fetch,
+    includeUsage: true,
     transformRequestBody: (body) => {
       if (baseURL !== GATEWAYS.routeway || body.model !== ROUTEWAY_GLM_FLASH_UNCENSORED) return body;
       const { seed: _seed, max_tokens: maxTokens, ...rest } = body;

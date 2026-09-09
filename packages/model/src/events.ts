@@ -62,8 +62,8 @@ export function eventContext(input: AgentRunInput) {
   return { agentRole: input.role ?? "solo", stage: input.stage ?? "PATCH" } as const;
 }
 
-export function emitUsage(input: AgentRunInput, budget: RunBudget, inputTokens: number, outputTokens: number): void {
-  input.onEvent({ type: "model_msg", role: "assistant", tokensIn: inputTokens, tokensOut: outputTokens, ...eventContext(input) });
+export function emitUsage(input: AgentRunInput, budget: RunBudget, inputTokens: number, outputTokens: number, outcome?: "completed" | "failed"): void {
+  input.onEvent({ type: "model_msg", role: "assistant", tokensIn: inputTokens, tokensOut: outputTokens, ...(outcome ? { outcome } : {}), ...eventContext(input) });
   const usage = budget.usage;
   input.onEvent({ type: "budget_update", tokens: usage.inputTokens + usage.outputTokens, usageKnown: budget.usageKnown, steps: usage.steps, elapsedMs: budget.elapsedMs, ...eventContext(input) });
 }

@@ -10,6 +10,38 @@ function trace(...payloads: Payload[]): HarnessEvent[] {
 }
 
 describe("agent activity derivation", () => {
+  it("updates one model row per attempt and keeps retry, execution, and replay states separate", () => {
+    const request = { type: "model_request" as const, requestId: "request-1", attempt: 1, transport: "stream" as const, agentRole: "red" as const, stage: "REVIEW" as const, outputChars: 0, elapsedMs: 0 };
+    const events = trace(
+      { ...request, phase: "waiting" },
+      { ...request, phase: "tool_input", elapsedMs: 100, firstChunkMs: 50, outputChars: 15, toolName: "read_file" },
+      { ...request, phase: "failed", elapsedMs: 200, detail: "Stream interrupted." },
+      { type: "model_msg", role: "assistant", agentRole: "red", tokensIn: 100, tokensOut: 50, outcome: "failed" },
+      { ...request, phase: "retry_wait", elapsedMs: 200, retryAt: 5000 },
+      { ...request, attempt: 2, phase: "waiting" },
+      { ...request, attempt: 2, phase: "completed", elapsedMs: 100 },
+      { type: "model_msg", role: "assistant", agentRole: "red", tokensIn: 20, tokensOut: 5, outcome: "completed" },
+    );
+    expect(deriveRun(events.slice(0, 2))!.currentModel?.phase).toBe("waiting");
+    expect(deriveRun(events.slice(0, 3))!.currentModel).toMatchObject({ phase: "tool_input", outputChars: 15, ts: events[1]!.ts });
+    expect(deriveRun(events.slice(0, 4))!.currentModel).toBeUndefined();
+    expect(deriveRun(events.slice(0, 6))!.currentModel?.phase).toBe("retry_wait");
+    const view = deriveRun(events)!;
+    expect(view.currentModel).toBeUndefined();
+    expect(view.activity.filter(item => item.kind === "model")).toHaveLength(2);
+    expect(view.usage.modelTurns).toBe(1);
+    expect(view.usage.tokens).toBe(175);
+  });
+
+  it("clears the previous role's current decision at handoff", () => {
+    const view = deriveRun(trace(
+      { type: "agent_update", agentRole: "red", stage: "REVIEW", summary: "Red's plan", nextAction: "Read", evidence: [], plan: [], callId: "plan" },
+      { type: "role_assigned", role: "blue", runner: "source-review" },
+    ))!;
+    expect(view.currentDecision).toBeUndefined();
+    expect(view.decisions).toHaveLength(1);
+  });
+
   it("shows historical partial reviews as incomplete without changing the stored trace or leaking the ending into replay", () => {
     const events = trace({ type: "run_end", status: "PATCH_PROPOSED", reason: "Old success", costUsd: null, elapsedMs: 1000 });
     expect(deriveRun(events.slice(0, 1), undefined, "partial")!.status).toBe("RUNNING");

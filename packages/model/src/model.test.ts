@@ -417,8 +417,9 @@ describe("SdkRunner", () => {
     const run = input();
     run.requestPolicy = { maxRetries: 2, timeoutMs: 2_000 };
     const result = new SdkRunner(() => model).run(run);
+    const assertion = expect(result).rejects.toThrow("no visible text or tool calls");
     await vi.advanceTimersByTimeAsync(3_000);
-    await expect(result).resolves.toEqual({ finalText: "", inputTokens: 30, outputTokens: 6, steps: 3 });
+    await assertion;
     expect(model.doGenerateCalls).toHaveLength(3);
     expect(run.budget!.usageKnown).toBe(true);
     expect(JSON.stringify(run.events)).not.toContain("private provider reasoning");

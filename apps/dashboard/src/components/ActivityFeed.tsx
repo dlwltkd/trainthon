@@ -38,6 +38,7 @@ import { Button, Chip, Mono, RoleChip } from "./ui";
 import { DecisionCard, SkillCard } from "./AgentActivity";
 import { FindingCard } from "./FindingsPanel";
 import { MarkdownSummary } from "./MarkdownSummary";
+import { ModelRequest } from "./ModelRequest";
 
 export interface FeedSelection {
   openFile: (path: string) => void;
@@ -127,6 +128,8 @@ function NowCard({ view, now, live }: { view: RunView; now: number; live: boolea
             </div>
           </div>
         </div>
+      ) : running && view.currentModel ? (
+        <div className="mt-2"><ModelRequest request={view.currentModel} now={live ? now : view.lastTs} live={live} /></div>
       ) : running ? (
         <div className="mt-1 flex items-center gap-2 text-[1.05em] font-medium tracking-tight text-ink-2">
           <CircleDashed className="size-4 animate-spin text-ink-3" style={{ animationDuration: "3s" }} />
@@ -160,6 +163,8 @@ function Entry({ entry, view, files, actions, now }: { entry: FeedEntry; view: R
     else [...document.querySelectorAll<HTMLElement>("[data-activity-id]")].find((node) => node.dataset.activityId === target.value && node.getClientRects().length > 0)?.scrollIntoView({ block: "center", behavior: "smooth" });
   };
   switch (entry.kind) {
+    case "model":
+      return <Row id={entry.id} icon={<CircleDashed className="size-3.5" />} accent={entry.agentRole}><ModelRequest request={entry} now={view.status === "RUNNING" ? now : view.lastTs} live={view.status === "RUNNING"} /></Row>;
     case "finding":
       return <Row id={entry.id} icon={<Search className="size-3.5" />} accent={entry.agentRole}><FindingCard finding={entry} view={view} files={files} onEvidence={onEvidence} /></Row>;
     case "skill":

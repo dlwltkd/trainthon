@@ -111,8 +111,12 @@ export function createRunProgress(
         break;
       case "model_msg":
         if (event.role !== "assistant") break;
-        print(`${role}model step finished`);
+        print(`${role}model ${event.outcome === "failed" ? "request failed" : "step finished"}`);
         activity = `${role}waiting for the next agent action`;
+        break;
+      case "model_request":
+        activity = `${role}${event.phase === "tool_input" ? `preparing ${label(event.toolName ?? "tool arguments")}` : event.phase === "retry_wait" ? "waiting to retry; completed tool results preserved" : event.phase === "receiving" ? "receiving model response" : event.phase === "waiting" ? "waiting for model response" : `model request ${event.phase}`}`;
+        if (event.phase !== "completed") print(`${activity}${event.phase === "retry_wait" && event.retryAt ? ` (${Math.max(0, Math.ceil((event.retryAt - Date.now()) / 1000))}s)` : ""}`);
         break;
       case "agent_summary":
         print(`${role}summary saved`);

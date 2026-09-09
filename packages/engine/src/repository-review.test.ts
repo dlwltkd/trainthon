@@ -93,7 +93,7 @@ describe("prompt-driven source review", () => {
         expect(input.system).toContain("You are Red");
         expect(input.handoffAfter).toBeUndefined();
         expect(input.maxOutputTokens).toBeUndefined();
-        expect(input.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000 });
+        expect(input.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream" });
         return new ScriptedRunner(async tools => {
           for (const name of ["write_file", "edit_file", "inspect_diff", "run_regression", "shell", "fetch"]) expect(tools[name]).toBeUndefined();
           await startReview(tools);
@@ -106,7 +106,7 @@ describe("prompt-driven source review", () => {
       runner: { run: async input => {
         phases.push(input.role!);
         expect(input.budget).toBe(sharedBudget);
-        expect(input.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000 });
+        expect(input.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream" });
         expect(input.prompt).toContain("Red source-review handoff");
         expect(input.prompt).toContain('"findingId": "addition"');
         expect(input.system).toContain("Independently validate every Red finding");
@@ -130,7 +130,7 @@ describe("prompt-driven source review", () => {
     expect(record.reviewSummary).toContain("Red observed subtraction");
     expect(record.reviewStatus).toBe("complete");
     expect(record).not.toHaveProperty("reviewHandoffAfter");
-    expect(record.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000 });
+    expect(record.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream" });
     expect(record.usage.steps).toBe(2);
     expect(record.findings.map(finding => [finding.agentRole, finding.findingId])).toEqual([["red", "addition"], ["blue", "addition"]]);
     expect(record.changes.findingIdsByFile).toEqual({ "src/add.ts": ["addition"] });

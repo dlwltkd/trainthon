@@ -7,12 +7,13 @@ import { Button, Chip, Empty, Mono, Panel, PanelHeader, RoleChip, Spinner } from
 import { EvidenceLinks } from "./EvidenceLinks";
 import { FindingCard } from "./FindingsPanel";
 import { MarkdownSummary } from "./MarkdownSummary";
+import { ModelRequest } from "./ModelRequest";
 
 export type { EvidenceTarget } from "@/lib/derive";
 
 export function AgentIntent({ view, files, onEvidence }: { view: RunView; files: string[]; onEvidence: (target: EvidenceTarget) => void }) {
   const decision = view.currentDecision;
-  const invokedModel = view.usage.modelTurns > 0;
+  const invokedModel = view.usage.modelTurns > 0 || view.activity.some(item => item.kind === "model");
   const latestNote = [...view.activity].reverse().find((item) => item.kind === "note" && !item.final);
   const active = view.status === "RUNNING";
   const sourcePatch = isRepositoryRemediation(view);
@@ -32,6 +33,7 @@ export function AgentIntent({ view, files, onEvidence }: { view: RunView; files:
           <p className="text-[0.9em] leading-relaxed text-ink-2">{view.status === "NOT_REPRODUCIBLE" && !invokedModel ? "The supplied regression already passed. The harness finished before calling a model or requesting a patch." : active && latestNote?.kind === "note" ? latestNote.text : !invokedModel ? "This record contains no model turns. Test results and harness actions are shown in the activity feed." : "This record does not contain structured decision updates."}</p>
         </>}
         {view.currentAction && <div className="flex items-start gap-2 border-t border-line pt-3 text-[0.87em]"><Spinner className="mt-0.5 size-3 shrink-0 text-info" /><div className="min-w-0"><span className="font-medium text-info">Tool in progress</span><p className="mt-0.5 break-words text-ink-2">{view.currentAction.summary}</p></div></div>}
+        {view.currentModel && <div className="border-t border-line pt-3"><ModelRequest request={view.currentModel} now={view.lastTs} /></div>}
       </div>
     </Panel>
     <Panel className="overflow-hidden">
@@ -67,6 +69,7 @@ export function AgentActivity({ view, files, onEvidence }: { view: RunView; file
 }
 
 function ActivityCard({ item, view, files, onEvidence }: { item: ActivityItem; view: RunView; files: string[]; onEvidence: (target: EvidenceTarget) => void }) {
+  if (item.kind === "model") return <ModelRequest request={item} now={view.lastTs} />;
   if (item.kind === "stage") return <div className="flex items-center gap-2 py-1 text-[0.78em] font-medium uppercase tracking-wide text-ink-3"><span className="h-px flex-1 bg-line" /><span>{STAGE_LABEL[item.to]}</span><span className="font-mono">{formatClock(item.ts - view.startedAt)}</span><span className="h-px flex-1 bg-line" /></div>;
   if (item.kind === "tool") return <ToolCard item={item} files={files} onEvidence={onEvidence} />;
   if (item.kind === "decision") return <DecisionCard item={item} view={view} files={files} onEvidence={onEvidence} />;

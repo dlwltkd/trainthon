@@ -1,8 +1,11 @@
 import { generateText, tool, wrapLanguageModel, type LanguageModel, type ToolSet } from "ai";
+import { randomUUID } from "node:crypto";
+import type { ModelRequestEvent } from "@vouch/protocol";
 import { RunBudget, withCancellation } from "./budget.js";
 import { emitUsage, eventContext, executeLoggedTool, toolEventArgs } from "./events.js";
 import type { AgentRunInput, AgentRunResult, AgentRunner } from "./types.js";
 import { ProviderRequestError, providerRequestError } from "./provider-errors.js";
+import { generateFromStream, type StreamActivity } from "./stream-response.js";
 
 export type ModelResolver = (modelId: string) => LanguageModel;
 export type MissingUsagePolicy = "strict" | "conservative-bound";
@@ -25,12 +28,17 @@ const REQUEST_OVERHEAD = 256;
 const MESSAGE_OVERHEAD = 64;
 const TOOL_OVERHEAD = 96;
 
-async function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
+async function waitForRetry(ms: number, signal: AbortSignal, heartbeat: () => void): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let interval: ReturnType<typeof setInterval> | undefined;
   try {
-    await withCancellation(new Promise<void>(resolve => { timer = setTimeout(resolve, ms); }), signal);
+    await withCancellation(new Promise<void>((resolve, reject) => {
+      timer = setTimeout(resolve, ms);
+      interval = setInterval(() => { try { heartbeat(); } catch (error) { reject(error); } }, 10_000);
+    }), signal);
   } finally {
     clearTimeout(timer);
+    clearInterval(interval);
   }
 }
 
@@ -91,7 +99,7 @@ export class SdkRunner implements AgentRunner {
       if (!Number.isSafeInteger(outputLimit) || outputLimit <= 0 || outputLimit > 8192) throw new Error("maxOutputTokens must be an integer between 1 and 8192");
       if (input.handoffAfter && ![input.handoffAfter.tokens, input.handoffAfter.steps].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error("handoffAfter allowances must be positive safe integers");
       const policy = input.requestPolicy;
-      if (policy && (!Number.isSafeInteger(policy.maxRetries) || policy.maxRetries < 0 || policy.maxRetries > 3 || !Number.isSafeInteger(policy.timeoutMs) || policy.timeoutMs <= 0)) throw new Error("requestPolicy requires 0–3 retries and a positive timeout");
+      if (policy && (!Number.isSafeInteger(policy.maxRetries) || policy.maxRetries < 0 || policy.maxRetries > 3 || !Number.isSafeInteger(policy.timeoutMs) || policy.timeoutMs <= 0 || policy.transport !== undefined && !["stream", "generate"].includes(policy.transport))) throw new Error("requestPolicy requires 0–3 retries, a positive timeout, and a supported transport");
       const resolved = this.resolve(input.model);
       if (typeof resolved === "string") throw new Error("ModelResolver must return an explicit provider model");
       const model = wrapLanguageModel({
@@ -103,11 +111,14 @@ export class SdkRunner implements AgentRunner {
             budget.requireTokens(estimatedInputTokens + 1);
             return {
               ...params,
+              ...(resolved.provider === "openai.responses" ? { seed: undefined } : {}),
               maxOutputTokens: Math.min(params.maxOutputTokens ?? outputLimit, outputLimit, budget.remainingTokens - estimatedInputTokens),
               abortSignal: budget.signal,
             };
           },
           wrapGenerate: async ({ model: providerModel, params }) => {
+            const requestId = randomUUID();
+            const transport = policy?.transport ?? "generate";
             for (let attempt = 0; ; attempt++) {
               budget.check();
               const estimatedInputTokens = estimateRequestInputTokens(params);
@@ -116,7 +127,35 @@ export class SdkRunner implements AgentRunner {
               const releaseReservation = budget.reserveTokens(estimatedInputTokens + maxOutputTokens);
               const deadline = new AbortController();
               const requestSignal = policy ? AbortSignal.any([budget.signal, deadline.signal]) : budget.signal;
-              const timer = policy ? setTimeout(() => deadline.abort(new ProviderRequestError(`Model API response timed out after ${policy.timeoutMs} ms.`, true)), policy.timeoutMs) : undefined;
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              const resetDeadline = () => {
+                clearTimeout(timer);
+                if (policy) timer = setTimeout(() => deadline.abort(new ProviderRequestError(`Model API response timed out after ${policy.timeoutMs} ms${transport === "stream" ? " without stream activity" : ""}.`, true)), policy.timeoutMs);
+              };
+              resetDeadline();
+              const startedAt = performance.now();
+              let firstChunkMs: number | undefined;
+              let outputChars = 0;
+              let phase: ModelRequestEvent["phase"] = "waiting";
+              let toolName: string | undefined;
+              let detail: string | undefined;
+              let retryAt: number | undefined;
+              let lastProgressAt = 0;
+              let completed = false;
+              const publish = () => {
+                lastProgressAt = performance.now();
+                input.onEvent({ type: "model_request", requestId, attempt: attempt + 1, transport, phase, elapsedMs: Math.floor(lastProgressAt - startedAt), firstChunkMs, outputChars, toolName, detail, retryAt, ...eventContext(input) });
+              };
+              const receive = (activity: StreamActivity) => {
+                resetDeadline();
+                firstChunkMs ??= Math.floor(performance.now() - startedAt);
+                const changed = phase !== activity.phase || activity.toolName !== undefined && activity.toolName !== toolName;
+                phase = activity.phase; outputChars = activity.outputChars;
+                if (phase !== "tool_input") toolName = undefined;
+                else if (activity.toolName && input.tools.some(tool => tool.name === activity.toolName)) toolName = activity.toolName;
+                if (changed || performance.now() - lastProgressAt >= 750) publish();
+              };
+              const heartbeat = setInterval(() => { try { publish(); } catch (error) { deadline.abort(error); } }, 10_000);
               budget.consumeStep(0, 0); steps++;
               let inTok = 0;
               let outTok = 0;
@@ -125,10 +164,12 @@ export class SdkRunner implements AgentRunner {
               let retryDelayMs = 0;
               let retrySummary = "";
               try {
+                publish();
                 input.onEvent({ type: "action_summary", summary: "Requesting the next model response", ...eventContext(input) });
                 budget.assertActive();
                 dispatched = true;
-                const result = await withCancellation(providerModel.doGenerate({ ...params, maxOutputTokens, abortSignal: requestSignal }), requestSignal);
+                const callParams = { ...params, maxOutputTokens, abortSignal: requestSignal };
+                const result = await withCancellation(transport === "stream" ? generateFromStream(providerModel, callParams, receive) : providerModel.doGenerate(callParams), requestSignal);
                 const reportedInput = result.usage.inputTokens;
                 const reportedOutput = result.usage.outputTokens;
                 const known = [reportedInput, reportedOutput].every(value => Number.isSafeInteger(value) && value! >= 0);
@@ -143,7 +184,9 @@ export class SdkRunner implements AgentRunner {
                 inputTokens += inTok; outputTokens += outTok;
                 budget.assertActive();
                 const visibleOutput = result.content.some(part => part.type === "tool-call" || part.type === "text" && part.text.trim());
-                if (policy && !visibleOutput && attempt < policy.maxRetries) throw new ProviderRequestError(`Model returned no visible text or tool calls (finish reason: ${result.finishReason}).`, true);
+                if (policy && !visibleOutput) throw new ProviderRequestError(`Model returned no visible text or tool calls (finish reason: ${result.finishReason}).`, true);
+                if (policy && !["stop", "tool-calls"].includes(result.finishReason)) throw new ProviderRequestError(`Model response was incomplete (finish reason: ${result.finishReason}).`, result.finishReason === "error" || result.finishReason === "unknown");
+                phase = "completed"; detail = result.finishReason; completed = true; publish();
                 return known ? result : { ...result, usage: { ...result.usage, inputTokens: inTok, outputTokens: outTok, totalTokens: inTok + outTok } };
               } catch (error) {
                 if (!receivedUsage) {
@@ -154,18 +197,20 @@ export class SdkRunner implements AgentRunner {
                     inputTokens += inTok; outputTokens += outTok;
                   }
                 }
-                budget.assertActive();
                 const failure = deadline.signal.aborted ? deadline.signal.reason : providerRequestError(error);
+                phase = "failed"; detail = failure instanceof ProviderRequestError ? failure.message : budget.signal.aborted ? "Request cancelled." : "Model request failed."; publish();
+                budget.assertActive();
                 if (!policy || !(failure instanceof ProviderRequestError) || !failure.retryable || attempt >= policy.maxRetries) throw failure;
                 retryDelayMs = failure.retryAfterMs ?? Math.min(1000 * 2 ** attempt, 8000);
                 retrySummary = `${failure.message} Retrying this model request (${attempt + 1}/${policy.maxRetries}) in ${retryDelayMs} ms; completed tools are preserved.`;
               } finally {
-                clearTimeout(timer); releaseReservation();
-                emitUsage(input, budget, inTok, outTok);
+                clearTimeout(timer); clearInterval(heartbeat); releaseReservation();
+                emitUsage(input, budget, inTok, outTok, completed ? "completed" : "failed");
               }
               budget.check();
               input.onEvent({ type: "action_summary", summary: retrySummary, ...eventContext(input) });
-              await waitForRetry(retryDelayMs, budget.signal);
+              phase = "retry_wait"; retryAt = Date.now() + retryDelayMs; publish();
+              await waitForRetry(retryDelayMs, budget.signal, publish);
             }
           },
         },

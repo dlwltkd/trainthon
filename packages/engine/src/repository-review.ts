@@ -30,7 +30,7 @@ export interface ExecuteRepositoryReviewOptions {
 }
 
 class IncompleteSourceReviewError extends Error {}
-const REQUEST_POLICY = Object.freeze({ maxRetries: 2, timeoutMs: 90_000 });
+const REQUEST_POLICY = Object.freeze({ maxRetries: 2, timeoutMs: 90_000, transport: "stream" as const });
 
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 function writeJson(path: string, value: unknown) {

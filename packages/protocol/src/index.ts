@@ -246,8 +246,25 @@ export interface ModelMsgEvent extends BaseEvent {
   role: "system" | "user" | "assistant" | "tool";
   tokensIn: number;
   tokensOut: number;
+  outcome?: "completed" | "failed";
   agentRole?: AgentRole;
   stage?: EngineState;
+}
+
+export interface ModelRequestEvent extends BaseEvent {
+  type: "model_request";
+  requestId: string;
+  attempt: number;
+  transport: "stream" | "generate";
+  phase: "waiting" | "receiving" | "tool_input" | "retry_wait" | "completed" | "failed";
+  elapsedMs: number;
+  firstChunkMs?: number;
+  outputChars: number;
+  toolName?: string;
+  retryAt?: number;
+  detail?: string;
+  agentRole: AgentRole;
+  stage: EngineState;
 }
 
 export interface BudgetUpdateEvent extends BaseEvent {
@@ -313,6 +330,7 @@ export type HarnessEvent =
   | FileChangeEvent
   | TestRunEvent
   | ModelMsgEvent
+  | ModelRequestEvent
   | BudgetUpdateEvent
   | DiffSnapshotEvent
   | GradeEvent
