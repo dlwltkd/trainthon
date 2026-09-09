@@ -15,12 +15,13 @@ export interface RunSummary {
   eventCount: number;
 }
 
-async function json<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(body || res.statusText);
+async function json<T>(res: Response | Promise<Response>): Promise<T> {
+  const r = await res;
+  if (!r.ok) {
+    const body = await r.text();
+    throw new Error(body || r.statusText);
   }
-  return res.json() as Promise<T>;
+  return r.json() as Promise<T>;
 }
 
 export const api = {

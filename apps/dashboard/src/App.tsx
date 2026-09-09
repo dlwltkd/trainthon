@@ -491,7 +491,8 @@ function Scatter({ cells }: { cells: BenchReport["cells"] }) {
           verified-fix
         </text>
         {points.map((p) => {
-          const cx = 40 + p.x * 250;
+          const jitter = p.condition === "C" ? 10 : -10;
+          const cx = 40 + p.x * 250 + jitter;
           const cy = 190 - p.y * 160;
           const fill = p.condition === "C" ? "#c23b22" : "#3d6b8a";
           return (
