@@ -64,12 +64,22 @@ describe("local defensive skills", () => {
 });
 
 describe("source review and remediation skills", () => {
+  test("shares contract review across roles without including development answers or runtime privileges", () => {
+    const review = REPOSITORY_REVIEW_SKILLS.find(skill => skill.id === "security-contract-review")!;
+    expect(SOURCE_REPAIR_SKILLS.find(skill => skill.id === review.id)).toBe(review);
+    expect(review.instructions).toContain("initialization before a try block");
+    expect(review.instructions).toContain("leave the source unchanged");
+    expect(review.instructions).toContain("original source verdict distinct");
+    expect(review.instructions).toContain("do not modify files");
+    for (const skill of SOURCE_REPAIR_SKILLS) expect(skill.instructions).not.toMatch(/development20|case-\d{2}|CVE-\d{4}-\d+|referenceSha256/);
+  });
+
   test("separates review specializations from source-edit capabilities", () => {
     expect(REPOSITORY_REVIEW_SKILLS.map(skill => skill.id)).toEqual([
-      "source-security-review", "auth-boundary-review", "config-dependency-review", "remediation-planning",
+      "source-security-review", "security-contract-review", "auth-boundary-review", "config-dependency-review", "remediation-planning",
     ]);
     expect(SOURCE_REPAIR_SKILLS.map(skill => skill.id)).toEqual([
-      "source-security-review", "source-remediation", "change-validation",
+      "source-security-review", "security-contract-review", "source-remediation", "change-validation",
     ]);
     expect(SOURCE_REPAIR_SKILLS[0]).toBe(REPOSITORY_REVIEW_SKILLS[0]);
     for (const catalog of [REPOSITORY_REVIEW_SKILLS, SOURCE_REPAIR_SKILLS]) {
@@ -101,7 +111,7 @@ describe("source review and remediation skills", () => {
     expect(value).toContain("severity must be low, medium, high, critical, or info");
     expect(value).toContain("confidence must be confirmed or potential");
     expect(value).toContain("only repository-relative paths observed through successful repository tools");
-    expect(value).toContain("Before repository tools, call use_skill and then report_progress");
+    expect(value).toContain("include progress: {summary,nextAction,evidence,plan} in the initial use_skill call");
     expect(value).toContain("Use at most six plan steps");
     expect(value).toContain("not private internal deliberation or raw chain-of-thought");
     expect(value).toContain("Before finishing, call report_progress");
@@ -120,8 +130,8 @@ describe("source review and remediation skills", () => {
     expect(validation).toContain("do not edit files");
     expect(systemPromptRepositoryReview()).toContain("result scope is source_review");
     expect(systemPromptRepositoryReview()).not.toContain("source-remediation");
-    expect(REPOSITORY_REVIEW_GUIDANCE.version).toBe("1.3.0");
-    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.2.0");
+    expect(REPOSITORY_REVIEW_GUIDANCE.version).toBe("1.4.0");
+    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.3.0");
   });
 
   test("separates Red's read-only discovery from Blue's independent source validation", () => {

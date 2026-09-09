@@ -228,7 +228,7 @@ export class SdkRunner implements AgentRunner {
           execute: async (args: unknown, options) => {
             const result = await executeLoggedTool(input, budget, spec, args, options.toolCallId);
             memory?.record(spec.name, args, result);
-            if (spec.name === "report_progress") lastProgressStep = steps;
+            if (spec.name === "report_progress" || spec.name === "use_skill" && result !== null && typeof result === "object" && "progress" in result) lastProgressStep = steps;
             return result;
           },
         });

@@ -23,6 +23,16 @@ function checkpoint(memory: SourceMemory, messages: ModelMessage[]) {
 }
 
 describe("SourceMemory", () => {
+  it("retains a public plan published by skill selection without a separate progress call", () => {
+    const memory = new SourceMemory(8_000, ["initial.py"]);
+    const messages = history();
+    memory.record("use_skill", {}, { id: "security-contract-review", version: "1.0.0", instructions: "Review the stated contract.", progress: { summary: "Review the supplied source contract.", evidence: ["initial.py"], nextAction: "Inspect relevant exits." } });
+    expect(memory.needsCheckpoint(messages)).toBe(true);
+    expect(memory.compact(messages)).toBeDefined();
+    expect(checkpoint(memory, messages)).toMatchObject({ activeSkill: { id: "security-contract-review" }, latestProgress: { evidence: ["initial.py"], nextAction: "Inspect relevant exits." } });
+    expect(checkpoint(memory, messages).activeSkill.progress).toBeUndefined();
+  });
+
   it("retains supplied source paths through compaction without treating unread paths as observed", () => {
     const memory = new SourceMemory(8_000, ["initial.py"]);
     const messages = history();

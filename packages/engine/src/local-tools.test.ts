@@ -189,6 +189,9 @@ test("edit_file changes one exact source fragment in a large file and rejects un
   await expect(f.call("edit_file", edit)).rejects.toThrow("confirmed source-backed finding");
   await f.call("read_file", { path: "app.py", startLine: 15_001 });
   await f.call("report_finding", { id: "arithmetic", title: "Arithmetic mismatch", severity: "low", confidence: "confirmed", evidence: ["app.py"], summary: "The addition function subtracts.", recommendation: "Use addition." });
+  await f.call("use_skill", { skillId: "security-contract-review", reason: "Check the stated source contract." });
+  await expect(f.call("edit_file", edit)).rejects.toThrow("source-remediation");
+  await f.call("use_skill", { skillId: "source-remediation", reason: "Apply the independently supported source correction." });
   await expect(f.call("edit_file", { ...edit, oldText: "# padding" })).rejects.toThrow("more than once");
   await expect(f.call("edit_file", { ...edit, oldText: "not present" })).rejects.toThrow("not found");
   await expect(f.call("edit_file", { ...edit, path: "tests/test_app.py", findingId: "arithmetic" })).rejects.toThrow("only application source");

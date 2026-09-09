@@ -31,7 +31,11 @@ export class SourceMemory {
       const path = object(hit).file;
       if (typeof path === "string") this.observed.add(path);
     }
-    if (name === "use_skill") this.skill = result;
+    if (name === "use_skill") {
+      const { progress, ...skill } = result;
+      this.skill = skill;
+      if (typeof object(progress).summary === "string") this.progress = object(progress);
+    }
     if (name === "report_progress") this.progress = args;
     if (name === "report_finding" && typeof args.id === "string") {
       this.findings.set(args.id, args);

@@ -33,6 +33,26 @@ const plan = {
 };
 const select = { skillId: "evidence-review", reason: "Locate the source checked by the supplied test." };
 
+test("publishes skill selection and its validated plan under one real call", async () => {
+  const f = fixture();
+  await expect(f.call("use_skill", { ...select, progress: plan })).resolves.toMatchObject({ id: select.skillId, progress: plan });
+  expect(f.events).toMatchObject([
+    { type: "skill_call", callId: "call-1", skillId: select.skillId },
+    { type: "agent_update", callId: "call-1", evidence: plan.evidence },
+  ]);
+  await expect(f.call("read_file", { path: "app.py" })).resolves.toBeDefined();
+});
+
+test("rejects an invalid bundled plan before granting readiness or publishing a skill", async () => {
+  const f = fixture();
+  await expect(f.call("use_skill", { ...select, progress: { ...plan, evidence: ["app.py"] } })).rejects.toThrow("observed repository file");
+  await expect(f.call("use_skill", { ...select, progress: { ...plan, plan: [plan.plan[0], plan.plan[0]] } })).rejects.toThrow("unique");
+  await expect(f.call("use_skill", { ...select, skillId: "minimal-repair", progress: plan })).rejects.toThrow("not available");
+  expect(f.events).toEqual([]);
+  await expect(f.call("report_progress", plan)).rejects.toThrow("use_skill");
+  await expect(f.call("read_file", { path: "app.py" })).rejects.toThrow("use_skill and report_progress");
+});
+
 test.each(["report_progress", "report_finding"])("%s accepts every observed evidence file and rejects unread files", async name => {
   const files = Array.from({ length: 7 }, (_, index) => `source-${index}.py`);
   const f = fixture(files);
