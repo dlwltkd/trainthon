@@ -1,0 +1,17 @@
+{
+  "id": "path-traversal",
+  "group": "path-lib",
+  "kind": "vuln",
+  "source": "synthetic",
+  "repoRef": {
+    "url": "bench/tasks/path-traversal/repo",
+    "commit": "HEAD"
+  },
+  "report": {
+    "text": "The safeJoin() function in src/join.ts is vulnerable to path traversal (CWE-22). Callers pass untrusted path segments expecting the result to stay under the given root, but \"..\" segments (and segments that themselves contain \"..\") concatenate in and resolve outside the root. Fix safeJoin so a resolved path cannot escape the root, while ordinary relative segments still join correctly.",
+    "hintLevel": 2
+  },
+  "publicTests": ["src/join.test.ts"],
+  "testCmd": "vitest run src/join.test.ts",
+  "split": "dev"
+}

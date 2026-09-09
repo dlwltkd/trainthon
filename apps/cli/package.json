@@ -1,0 +1,13 @@
+{
+  "name": "@vouch/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "vouch": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vouch/engine": "workspace:*",
+    "@vouch/protocol": "workspace:*"
+  }
+}

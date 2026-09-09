@@ -1,0 +1,17 @@
+{
+  "name": "@vouch/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vouch/protocol": "workspace:*",
+    "@vouch/sandbox": "workspace:*",
+    "@vouch/grader": "workspace:*",
+    "@vouch/model": "workspace:*",
+    "@vouch/skills": "workspace:*",
+    "zod": "^3.25.0"
+  }
+}

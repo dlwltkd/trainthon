@@ -1,0 +1,17 @@
+{
+  "id": "proto-pollution",
+  "group": "merge-lib",
+  "kind": "vuln",
+  "source": "synthetic",
+  "repoRef": {
+    "url": "bench/tasks/proto-pollution/repo",
+    "commit": "HEAD"
+  },
+  "report": {
+    "text": "The deepMerge() function in src/merge.ts is vulnerable to prototype pollution (CWE-1321). A source object carrying a \"__proto__\" key (for example one produced by JSON.parse of untrusted input) can reach and modify Object.prototype, affecting unrelated objects across the process. Fix deepMerge so dangerous keys cannot pollute the prototype, while normal deep merging of ordinary keys keeps working.",
+    "hintLevel": 2
+  },
+  "publicTests": ["src/merge.test.ts"],
+  "testCmd": "vitest run src/merge.test.ts",
+  "split": "dev"
+}
