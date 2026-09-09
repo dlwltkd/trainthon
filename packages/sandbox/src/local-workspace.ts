@@ -26,6 +26,7 @@ import type { DiffResult } from "./worktree.js";
 
 const gitExec = promisify(execFile);
 const MAX_FILE_BYTES = 2_000_000;
+const MAX_PROTECTED_FILE_BYTES = 8_000_000;
 const MAX_REPOSITORY_BYTES = 30_000_000;
 const MAX_FILES = 3000;
 const records = new WeakMap<LocalWorkspace, Map<string, Buffer>>();
@@ -77,10 +78,11 @@ function validateRelative(path: string): void {
 }
 
 function isSourcePath(path: string): boolean {
-  return /\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)
+  return /\.(?:[cm]?[jt]s|[jt]sx|py)$/.test(path)
     && !/\s/.test(path)
     && !/(?:^|\/)(?:__tests__|tests?|specs?|__mocks__|fixtures?|__fixtures__|scripts?|\.github)(?:\/|$)/i.test(path)
     && !/(?:^|[./_-])(?:test|spec|config|setup|teardown)(?:[./_-]|$)/i.test(path)
+    && !/(?:^|\/)(?:conftest|sitecustomize|usercustomize)\.py$/i.test(path)
     && !isHiddenPath(path);
 }
 
@@ -126,7 +128,8 @@ export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions):
     validateRelative(path);
     if (isHiddenPath(path)) continue;
     if (type !== "blob" || !["100644", "100755"].includes(mode)) throw new Error(`symlinks and submodules are unsupported: ${path}`);
-    if (Number(size) > MAX_FILE_BYTES) throw new Error(`file exceeds 2 MB snapshot limit: ${path}`);
+    const fileLimit = isSourcePath(path) ? MAX_FILE_BYTES : MAX_PROTECTED_FILE_BYTES;
+    if (Number(size) > fileLimit) throw new Error(`file exceeds ${fileLimit / 1_000_000} MB snapshot limit: ${path}`);
     bytes += Number(size);
     if (bytes > MAX_REPOSITORY_BYTES || original.size >= MAX_FILES) throw new Error("repository exceeds MVP snapshot limits (30 MB / 3000 files)");
     original.set(path, await git(repoPath, ["cat-file", "blob", oid], opts.signal));
@@ -135,7 +138,9 @@ export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions):
   const supplied = safePath(repoPath, opts.regressionPath);
   if (!existsSync(supplied)) throw new Error("supplied regression must be an existing regular file");
   const regression = readBoundedRegularFile(supplied, MAX_FILE_BYTES, "regression");
+  bytes += regression.length - (original.get(opts.regressionPath)?.length ?? 0);
   original.set(opts.regressionPath, regression);
+  if (bytes > MAX_REPOSITORY_BYTES || original.size > MAX_FILES) throw new Error("repository exceeds MVP snapshot limits (30 MB / 3000 files)");
   modes.set(opts.regressionPath, 0o644);
   mkdirSync(resolve(opts.workspacesDir), { recursive: true, mode: 0o700 });
   const root = mkdtempSync(join(resolve(opts.workspacesDir), "local-"));
@@ -176,8 +181,8 @@ function changes(workspace: LocalWorkspace): Map<string, Buffer | null> {
   const changed = new Map<string, Buffer | null>();
   for (const path of all) {
     const abs = safePath(workspace.dir, path);
-    const data = existsSync(abs) ? readFileSync(abs) : null;
-    if (data && data.length > MAX_FILE_BYTES) throw new Error(`source file exceeds limit: ${path}`);
+    const fileLimit = isLocalSourcePath(workspace, path) ? MAX_FILE_BYTES : MAX_PROTECTED_FILE_BYTES;
+    const data = existsSync(abs) ? readBoundedRegularFile(abs, fileLimit, path) : null;
     const prior = original.get(path);
     const expectedMode = modes?.get(path) ?? 0o644;
     if (data && Boolean(statSync(abs).mode & 0o111) !== Boolean(expectedMode & 0o111)) {

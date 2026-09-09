@@ -100,6 +100,27 @@ describe("committed repository workspace", () => {
     await expect(f.prepare()).rejects.toThrow("regression exceeds 2000000 byte limit");
   });
 
+  test("permits Python source edits while preserving test bootstrap and larger fixtures", async () => {
+    const f = fixture();
+    mkdirSync(join(f.repo, "tests"));
+    writeFileSync(join(f.repo, "app.py"), "def add(a, b): return a - b\n");
+    for (const path of ["conftest.py", "sitecustomize.py", "usercustomize.py", "tests/test_app.py"]) {
+      writeFileSync(join(f.repo, path), "# immutable test environment\n");
+    }
+    writeFileSync(join(f.repo, "tests", "sample.bin"), Buffer.alloc(2_800_000, 1));
+    f.git("add", "."); f.git("-c", "user.name=Test", "-c", "user.email=test@local", "commit", "-qm", "python fixture");
+    const workspace = await f.prepare();
+    writeLocalSource(workspace, "app.py", "def add(a, b): return a + b\n");
+    for (const path of ["conftest.py", "src/conftest.py", "sitecustomize.py", "usercustomize.py", "tests/test_app.py"]) {
+      expect(() => writeLocalSource(workspace, path, "# changed\n")).toThrow("only application source");
+    }
+    const verified = await createVerificationWorkspace(workspace);
+    expect(statSync(join(verified, "tests", "sample.bin")).size).toBe(2_800_000);
+    expect((await captureLocalChanges(workspace)).changedFiles).toEqual(["app.py"]);
+    writeFileSync(join(workspace.dir, "tests", "sample.bin"), Buffer.alloc(2_800_000, 2));
+    await expect(createVerificationWorkspace(workspace)).rejects.toThrow("protected file changed");
+  });
+
 });
 
 test("harness-owned Vitest options ignore computed config dependencies", () => {
