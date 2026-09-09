@@ -316,9 +316,113 @@ describe("SdkRunner", () => {
   it("counts failed requests and never retries a provider error", async () => {
     const model = new MockLanguageModelV2({ doGenerate: async () => { throw new APICallError({ message: "provider unavailable", url: "https://provider.example/v1", requestBodyValues: {}, statusCode: 503, isRetryable: true }); } });
     const run = input();
-    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("provider unavailable");
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("HTTP 503");
     expect(model.doGenerateCalls).toHaveLength(1);
     expect(run.budget!.usage).toEqual({ inputTokens: 0, outputTokens: 0, steps: 1 });
+  });
+
+  it("retries the failed response without replaying completed tools and accounts for the unreported attempt", async () => {
+    const model = new MockLanguageModelV2({ doGenerate: async () => {
+      if (model.doGenerateCalls.length === 1) return toolReply();
+      if (model.doGenerateCalls.length === 2) throw new APICallError({ message: "no error message was provided", url: "https://provider.example/v1", requestBodyValues: {}, statusCode: 502, responseHeaders: { "retry-after": "0" } });
+      return reply();
+    } });
+    const run = input(budget({ maxTokens: 100_000 }));
+    run.requestPolicy = { maxRetries: 2, timeoutMs: 2_000 };
+    const execute = vi.fn(async () => "observed fixture");
+    run.tools = [fileTool(execute)];
+    const result = await new SdkRunner(() => model).run(run);
+    expect(result.finalText).toBe("Done");
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(model.doGenerateCalls).toHaveLength(3);
+    expect(model.doGenerateCalls[2]!.prompt).toEqual(model.doGenerateCalls[1]!.prompt);
+    const failed = model.doGenerateCalls[1]!;
+    expect(run.budget!.usage).toEqual({ inputTokens: 20 + estimateRequestInputTokens(failed), outputTokens: 4 + failed.maxOutputTokens!, steps: 3 });
+    expect(result).toMatchObject(run.budget!.usage);
+    expect(run.budget!.usageKnown).toBe(false);
+    expect(run.events.filter(event => event.type === "tool_call")).toHaveLength(1);
+    expect(run.events).toContainEqual(expect.objectContaining({ type: "action_summary", summary: expect.stringContaining("HTTP 502). Retrying this model request (1/2)") }));
+  });
+
+  it("backs off and stops after the configured number of retries", async () => {
+    vi.useFakeTimers();
+    const model = new MockLanguageModelV2({ doGenerate: async () => { throw new APICallError({ message: "unavailable", url: "https://provider.example/v1", requestBodyValues: {}, statusCode: 503 }); } });
+    const run = input(budget({ maxTokens: 100_000 }));
+    run.requestPolicy = { maxRetries: 2, timeoutMs: 2_000 };
+    const assertion = expect(new SdkRunner(() => model).run(run)).rejects.toThrow("HTTP 503");
+    await vi.advanceTimersByTimeAsync(999);
+    expect(model.doGenerateCalls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await assertion;
+    expect(model.doGenerateCalls).toHaveLength(3);
+    expect(run.budget!.usage.steps).toBe(3);
+  });
+
+  it("does not retry rejected credentials even if the provider marks them retryable", async () => {
+    const model = new MockLanguageModelV2({ doGenerate: async () => { throw new APICallError({ message: "auth rejected", url: "https://provider.example/v1", requestBodyValues: {}, statusCode: 401, isRetryable: true }); } });
+    const run = input();
+    run.requestPolicy = { maxRetries: 2, timeoutMs: 2_000 };
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("HTTP 401");
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(run.events.some(event => event.type === "action_summary" && event.summary.includes("Retrying"))).toBe(false);
+  });
+
+  it("aborts a hung request and retries with a fresh deadline", async () => {
+    vi.useFakeTimers();
+    const model = new MockLanguageModelV2({ doGenerate: async (): Promise<ModelReply> => model.doGenerateCalls.length === 1 ? new Promise<never>(() => {}) : reply() });
+    const run = input(budget({ maxTokens: 100_000 }));
+    run.requestPolicy = { maxRetries: 1, timeoutMs: 25 };
+    const result = new SdkRunner(() => model).run(run);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(model.doGenerateCalls[0]!.abortSignal!.aborted).toBe(true);
+    expect(run.budget!.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(result).resolves.toMatchObject({ finalText: "Done", steps: 2 });
+    expect(model.doGenerateCalls[1]!.abortSignal!.aborted).toBe(false);
+    expect(run.events).toContainEqual(expect.objectContaining({ type: "action_summary", summary: expect.stringContaining("timed out after 25 ms") }));
+  });
+
+  it("honors cancellation while waiting to retry", async () => {
+    const controller = new AbortController();
+    const run = input(budget({ maxTokens: 100_000 }, controller.signal));
+    run.requestPolicy = { maxRetries: 2, timeoutMs: 2_000 };
+    run.onEvent = event => {
+      run.events.push(event);
+      if (event.type === "action_summary" && event.summary.includes("Retrying")) controller.abort();
+    };
+    const model = new MockLanguageModelV2({ doGenerate: async () => { throw new APICallError({ message: "busy", url: "https://provider.example/v1", requestBodyValues: {}, statusCode: 429 }); } });
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow(RunCancelledError);
+    expect(model.doGenerateCalls).toHaveLength(1);
+  });
+
+  it.each([
+    { maxTokens: 100_000, maxSteps: 1, reason: "steps" },
+    { maxTokens: 2_000, maxSteps: 4, reason: "tokens" },
+  ])("keeps retries inside the shared $reason budget", async ({ maxTokens, maxSteps, reason }) => {
+    const model = new MockLanguageModelV2({ doGenerate: async () => { throw new APICallError({ message: "busy", url: "https://provider.example/v1", requestBodyValues: {}, statusCode: 502 }); } });
+    const run = input(budget({ maxTokens, maxSteps }));
+    run.requestPolicy = { maxRetries: 2, timeoutMs: 2_000 };
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow(`${reason} budget exhausted`);
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(run.events.some(event => event.type === "action_summary" && event.summary.includes("Retrying"))).toBe(false);
+  });
+
+  it("retries an empty reply without exposing reasoning or fabricating a final response", async () => {
+    vi.useFakeTimers();
+    const model = new MockLanguageModelV2({ doGenerate: reply([{ type: "reasoning", text: "private provider reasoning" }]) });
+    const run = input();
+    run.requestPolicy = { maxRetries: 2, timeoutMs: 2_000 };
+    const result = new SdkRunner(() => model).run(run);
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(result).resolves.toEqual({ finalText: "", inputTokens: 30, outputTokens: 6, steps: 3 });
+    expect(model.doGenerateCalls).toHaveLength(3);
+    expect(run.budget!.usageKnown).toBe(true);
+    expect(JSON.stringify(run.events)).not.toContain("private provider reasoning");
+    expect(run.events.filter(event => event.type === "action_summary" && event.summary.includes("no visible text or tool calls"))).toHaveLength(2);
   });
 
   it("records rejected tool arguments even when execution never starts", async () => {

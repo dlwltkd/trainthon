@@ -24,6 +24,8 @@ export interface AgentRunInput {
   maxOutputTokens?: number;
   /** Finish this role with a tool-free handoff after either investigation allowance is reached. */
   handoffAfter?: { tokens: number; steps: number };
+  /** Retry transport failures within the same model turn without replaying tools. */
+  requestPolicy?: { maxRetries: number; timeoutMs: number };
   /** Constrain whether the provider may or must call one of the supplied tools. */
   toolChoice?: "auto" | "required" | "none";
   /** Emit events to the run log as the agent works. */

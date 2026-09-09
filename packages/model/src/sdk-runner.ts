@@ -2,6 +2,7 @@ import { generateText, tool, wrapLanguageModel, type LanguageModel, type ToolSet
 import { RunBudget, withCancellation } from "./budget.js";
 import { emitUsage, eventContext, executeLoggedTool, toolEventArgs } from "./events.js";
 import type { AgentRunInput, AgentRunResult, AgentRunner } from "./types.js";
+import { ProviderRequestError, providerRequestError } from "./provider-errors.js";
 
 export type ModelResolver = (modelId: string) => LanguageModel;
 export type MissingUsagePolicy = "strict" | "conservative-bound";
@@ -23,6 +24,15 @@ type RequestForEstimate = {
 const REQUEST_OVERHEAD = 256;
 const MESSAGE_OVERHEAD = 64;
 const TOOL_OVERHEAD = 96;
+
+async function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await withCancellation(new Promise<void>(resolve => { timer = setTimeout(resolve, ms); }), signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Provider-independent upper bound for ordinary byte-tokenized text requests.
@@ -80,6 +90,8 @@ export class SdkRunner implements AgentRunner {
       const outputLimit = input.maxOutputTokens ?? 8192;
       if (!Number.isSafeInteger(outputLimit) || outputLimit <= 0 || outputLimit > 8192) throw new Error("maxOutputTokens must be an integer between 1 and 8192");
       if (input.handoffAfter && ![input.handoffAfter.tokens, input.handoffAfter.steps].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error("handoffAfter allowances must be positive safe integers");
+      const policy = input.requestPolicy;
+      if (policy && (!Number.isSafeInteger(policy.maxRetries) || policy.maxRetries < 0 || policy.maxRetries > 3 || !Number.isSafeInteger(policy.timeoutMs) || policy.timeoutMs <= 0)) throw new Error("requestPolicy requires 0–3 retries and a positive timeout");
       const resolved = this.resolve(input.model);
       if (typeof resolved === "string") throw new Error("ModelResolver must return an explicit provider model");
       const model = wrapLanguageModel({
@@ -95,63 +107,65 @@ export class SdkRunner implements AgentRunner {
               abortSignal: budget.signal,
             };
           },
-          wrapGenerate: async ({ doGenerate, params }) => {
-            budget.check();
-            const estimatedInputTokens = estimateRequestInputTokens(params);
-            const releaseReservation = budget.reserveTokens(estimatedInputTokens + (params.maxOutputTokens ?? 0));
-            budget.consumeStep(0, 0);
-            steps++;
-            let inTok = 0;
-            let outTok = 0;
-            let receivedUsage = false;
-            try {
-              input.onEvent({
-                type: "action_summary",
-                summary: "Requesting the next model response",
-                ...eventContext(input),
-              });
-              budget.assertActive();
-              const result = await withCancellation(doGenerate(), budget.signal);
-              const reportedInput = result.usage.inputTokens;
-              const reportedOutput = result.usage.outputTokens;
-              if (![reportedInput, reportedOutput].every(value => Number.isSafeInteger(value) && value! >= 0)) {
-                budget.markUsageUnknown();
-                if (this.options.missingUsagePolicy !== "conservative-bound") {
-                  throw new Error("Provider did not return complete token usage");
-                }
-                inTok = estimatedInputTokens;
-                outTok = params.maxOutputTokens ?? 0;
-                releaseReservation();
-                budget.recordTokens(inTok, outTok);
-                receivedUsage = true;
-                inputTokens += inTok;
-                outputTokens += outTok;
+          wrapGenerate: async ({ model: providerModel, params }) => {
+            for (let attempt = 0; ; attempt++) {
+              budget.check();
+              const estimatedInputTokens = estimateRequestInputTokens(params);
+              budget.requireTokens(estimatedInputTokens + 1);
+              const maxOutputTokens = Math.min(params.maxOutputTokens ?? outputLimit, budget.remainingTokens - estimatedInputTokens);
+              const releaseReservation = budget.reserveTokens(estimatedInputTokens + maxOutputTokens);
+              const deadline = new AbortController();
+              const requestSignal = policy ? AbortSignal.any([budget.signal, deadline.signal]) : budget.signal;
+              const timer = policy ? setTimeout(() => deadline.abort(new ProviderRequestError(`Model API response timed out after ${policy.timeoutMs} ms.`, true)), policy.timeoutMs) : undefined;
+              budget.consumeStep(0, 0); steps++;
+              let inTok = 0;
+              let outTok = 0;
+              let receivedUsage = false;
+              let dispatched = false;
+              let retryDelayMs = 0;
+              let retrySummary = "";
+              try {
+                input.onEvent({ type: "action_summary", summary: "Requesting the next model response", ...eventContext(input) });
                 budget.assertActive();
-                return {
-                  ...result,
-                  usage: {
-                    ...result.usage,
-                    inputTokens: inTok,
-                    outputTokens: outTok,
-                    totalTokens: inTok + outTok,
-                  },
-                };
+                dispatched = true;
+                const result = await withCancellation(providerModel.doGenerate({ ...params, maxOutputTokens, abortSignal: requestSignal }), requestSignal);
+                const reportedInput = result.usage.inputTokens;
+                const reportedOutput = result.usage.outputTokens;
+                const known = [reportedInput, reportedOutput].every(value => Number.isSafeInteger(value) && value! >= 0);
+                if (!known) {
+                  budget.markUsageUnknown();
+                  if (this.options.missingUsagePolicy !== "conservative-bound") throw new Error("Provider did not return complete token usage");
+                }
+                inTok = known ? reportedInput! : estimatedInputTokens;
+                outTok = known ? reportedOutput! : maxOutputTokens;
+                releaseReservation();
+                budget.recordTokens(inTok, outTok); receivedUsage = true;
+                inputTokens += inTok; outputTokens += outTok;
+                budget.assertActive();
+                const visibleOutput = result.content.some(part => part.type === "tool-call" || part.type === "text" && part.text.trim());
+                if (policy && !visibleOutput && attempt < policy.maxRetries) throw new ProviderRequestError(`Model returned no visible text or tool calls (finish reason: ${result.finishReason}).`, true);
+                return known ? result : { ...result, usage: { ...result.usage, inputTokens: inTok, outputTokens: outTok, totalTokens: inTok + outTok } };
+              } catch (error) {
+                if (!receivedUsage) {
+                  budget.markUsageUnknown();
+                  if (policy && dispatched) {
+                    inTok = estimatedInputTokens; outTok = maxOutputTokens;
+                    releaseReservation(); budget.recordTokens(inTok, outTok);
+                    inputTokens += inTok; outputTokens += outTok;
+                  }
+                }
+                budget.assertActive();
+                const failure = deadline.signal.aborted ? deadline.signal.reason : providerRequestError(error);
+                if (!policy || !(failure instanceof ProviderRequestError) || !failure.retryable || attempt >= policy.maxRetries) throw failure;
+                retryDelayMs = failure.retryAfterMs ?? Math.min(1000 * 2 ** attempt, 8000);
+                retrySummary = `${failure.message} Retrying this model request (${attempt + 1}/${policy.maxRetries}) in ${retryDelayMs} ms; completed tools are preserved.`;
+              } finally {
+                clearTimeout(timer); releaseReservation();
+                emitUsage(input, budget, inTok, outTok);
               }
-              inTok = reportedInput!;
-              outTok = reportedOutput!;
-              releaseReservation();
-              budget.recordTokens(inTok, outTok);
-              receivedUsage = true;
-              inputTokens += inTok;
-              outputTokens += outTok;
-              budget.assertActive();
-              return result;
-            } catch (error) {
-              if (!receivedUsage) budget.markUsageUnknown();
-              throw error;
-            } finally {
-              releaseReservation();
-              emitUsage(input, budget, inTok, outTok);
+              budget.check();
+              input.onEvent({ type: "action_summary", summary: retrySummary, ...eventContext(input) });
+              await waitForRetry(retryDelayMs, budget.signal);
             }
           },
         },
@@ -201,7 +215,7 @@ export class SdkRunner implements AgentRunner {
       return { finalText: result.text, inputTokens, outputTokens, steps };
     } catch (error) {
       if (budget.signal.aborted) throw budget.signal.reason;
-      throw error;
+      throw providerRequestError(error);
     } finally {
       if (!input.budget) budget.dispose();
     }

@@ -185,6 +185,16 @@ can exceed that allowance while recorded usage remains below the limit; this is
 reported as a request-size limit, separately from time or step limits. It does
 not indicate the provider account's balance.
 
+Prompt reviews retry transient model API failures (HTTP 408, 429, and 5xx),
+connection failures marked retryable by the provider, and empty replies up to
+twice per request. Each attempt has a 90-second deadline. Retries retain completed
+tool results and count toward the shared run limits; they do not restart the
+review. The timeline shows the HTTP status or timeout and the retry delay.
+`Retry-After` is honored when supplied; otherwise retries wait one and two
+seconds. Cancellation and the run deadline interrupt that wait. Failed attempts
+without usage are conservatively accounted and marked unknown. Repeated empty
+Red replies produce an explicitly partial handoff only when source was observed.
+
 To repair against an existing regression, provide `--regression`. Both `--report`
 and a supplemental `--prompt` are optional; `--fix` cannot be combined with this
 mode because regression repair already permits source changes:

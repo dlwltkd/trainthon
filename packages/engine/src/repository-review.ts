@@ -29,6 +29,7 @@ export interface ExecuteRepositoryReviewOptions {
 }
 
 class IncompleteSourceReviewError extends Error {}
+const REQUEST_POLICY = Object.freeze({ maxRetries: 2, timeoutMs: 90_000 });
 
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 function writeJson(path: string, value: unknown) {
@@ -50,7 +51,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   const startedAt = Date.now();
   let configHash = "invalid-config";
   let configError: unknown;
-  try { configHash = hash(JSON.stringify({ workflow, repo: options.repoPath, ref: options.ref ?? "HEAD", prompt: options.prompt, report: options.report ?? "", model: canonicalizeModelSpec(options.model), ...(options.reviewModel ? { reviewModel: canonicalizeModelSpec(options.reviewModel) } : {}), budgets: options.budgets, seed: options.seed })); }
+  try { configHash = hash(JSON.stringify({ workflow, repo: options.repoPath, ref: options.ref ?? "HEAD", prompt: options.prompt, report: options.report ?? "", model: canonicalizeModelSpec(options.model), ...(options.reviewModel ? { reviewModel: canonicalizeModelSpec(options.reviewModel) } : {}), budgets: options.budgets, requestPolicy: REQUEST_POLICY, seed: options.seed })); }
   catch (error) { configError = error; }
   logger.emit({ type: "run_start", runKind: "local_repository", workflow, configHash, mode: "live", model: options.model.model, seed: options.seed, budgets: options.budgets });
   let budget: RunBudget | undefined;
@@ -108,7 +109,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
       status = "INFRA_ERROR"; invoked = true;
       const reviewed = await reviewer.run({
         system: systemPromptRepositoryReview("red"), prompt, tools: reviewToolset.tools,
-        budgets: options.budgets, budget, model: options.reviewModel.model, seed: options.seed, role: "red", stage,
+        budgets: options.budgets, budget, model: options.reviewModel.model, seed: options.seed, role: "red", stage, requestPolicy: REQUEST_POLICY,
         onEvent: emitAgentEvent,
       });
       await reviewToolset.drain(); budget.assertActive();
@@ -136,7 +137,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     const result = await runner.run({
       system: options.remediate ? systemPromptRepositoryRepair() : systemPromptRepositoryReview(),
       prompt: prompt + handoff,
-      tools: toolset.tools, budgets: options.budgets, budget, model: options.model.model, seed: options.seed, role: "blue", stage,
+      tools: toolset.tools, budgets: options.budgets, budget, model: options.model.model, seed: options.seed, role: "blue", stage, requestPolicy: REQUEST_POLICY,
       onEvent: emitAgentEvent,
     });
     await toolset.drain(); budget.assertActive();
@@ -182,7 +183,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   const record = {
     schemaVersion: 3, kind: "local_repository" as const, workflow, runId, mode: "live" as const, configHash, status, reason, summary,
     startedAt, endedAt, elapsedMs: endedAt - startedAt, costUsd: invoked ? null : 0,
-    seed: options.seed, budgets: options.budgets, usage: budget?.usage ?? { inputTokens: 0, outputTokens: 0, steps: 0 }, usageKnown: budget?.usageKnown ?? true,
+    seed: options.seed, budgets: options.budgets, requestPolicy: REQUEST_POLICY, usage: budget?.usage ?? { inputTokens: 0, outputTokens: 0, steps: 0 }, usageKnown: budget?.usageKnown ?? true,
     repository: { name: source?.name ?? basename(options.repoPath), url: source?.url, requestedRef: options.ref ?? "HEAD", commit: workspace?.commit ?? null, files: workspace?.files.length ?? 0 },
     model: options.model, ...(options.reviewModel ? { reviewModel: options.reviewModel, reviewSummary, ...(reviewStatus ? { reviewStatus } : {}) } : {}), verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged: status === "PATCH_PROPOSED" },
     findings: [...recordedFindings.values()], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },
