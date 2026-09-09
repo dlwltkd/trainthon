@@ -57,8 +57,8 @@ export async function runCodexSource(options: { dir: string; prompt: string; sou
         if (event.type === "turn.completed" && Number.isFinite(event.usage?.input_tokens) && Number.isFinite(event.usage?.output_tokens)) {
           usage = { inputTokens: event.usage.input_tokens, outputTokens: event.usage.output_tokens };
         }
-        if (event.item?.type && !["agent_message", "reasoning"].includes(event.item.type)) stop("unexpected tool activity in the source-only Codex condition");
-        if (event.type === "turn.failed" || event.type === "error") failure ??= "Codex reported a failed model turn";
+        if (event.item?.type && !["agent_message", "reasoning", "error", "todo_list"].includes(event.item.type)) stop("unexpected tool activity in the source-only Codex condition");
+        if (event.type === "turn.failed") failure ??= "Codex reported a failed model turn";
       } catch { /* Non-JSON process output is not published. */ }
     }
   });
