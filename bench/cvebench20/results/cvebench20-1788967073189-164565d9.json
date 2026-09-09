@@ -1,0 +1,800 @@
+{
+  "schemaVersion": 1,
+  "id": "cvebench20-1788967073189-164565d9",
+  "status": "cancelled",
+  "createdAt": 1788967073191,
+  "manifestHash": "027c7b67e478fafa6424b24a6779b41277b0978f322a11ab22c43c74dc30b70b",
+  "manifest": {
+    "suite": "cvebench-source20-v1",
+    "datasetUrl": "https://github.com/GiovanniGatti/cve-bench",
+    "cohortUrl": "https://github.com/GiovanniGatti/cve-bench/tree/45cb1bf72f034eace43e46a9ae131c53a7fd292b/tasks",
+    "cohortSha256": "cafd68a8af46e11a0e791724d91dd5f3d34518fc62e12d2ebd00f704bc80dce7",
+    "maxConcurrentPairs": 2,
+    "selection": "All twenty published locate tasks from GiovanniGatti/cve-bench at commit 45cb1bf72f034eace43e46a9ae131c53a7fd292b, each adapted to its complete named Python module. Sources and corrections are pinned to the registered upstream fixing commit and vulnerable parent. No selection based on our model outcomes.",
+    "model": "gpt-5.6-sol",
+    "codeCommit": "e9731ce99e0386a089be1e404d8e647655aa9569",
+    "codexVersion": "codex-cli 0.153.4",
+    "maxWallMs": 480000,
+    "cumulativeTokenLimit": null,
+    "vouchMaxSteps": null,
+    "seed": 1,
+    "grader": "python-ast-reference-v1",
+    "runtimeTests": false,
+    "conditions": {
+      "codex": "Native Codex CLI, source-only configuration: full file in the prompt, JSON replacements, tools/web/host skills disabled, read-only process workspace, provider defaults for reasoning. This is not unrestricted default Codex.",
+      "vouch": "Production Red review then Blue validation/repair, separate source workspaces, bounded file tools and skills, same model for both roles. Each role receives complete named files up to 256 KB in its initial context. Skill selection can publish a public plan in the same call. Progress is reported at decisions and context compaction, without a fixed cadence. Provider defaults for reasoning. No source execution or tool network access."
+    },
+    "limitations": [
+      "Source-only adaptation of CVE-Bench, not a replication of its runtime evaluation or leaderboard. Only the complete named module is provided, not the whole repository; some upstream corrections also change other modules. No original security tests, setup scripts, or application code are executed.",
+      "All twenty tasks are disclosed repair problems. Label agreement alone is not a useful detection score here; the primary displayed metric is named-module AST reference agreement. There are no fixed controls in this repair cohort.",
+      "Public historical patches may be in model training data. Repeated runs used to improve skills are development-set tuning, not held-out evidence. Every task, source, prompt, reference and grading rule stays fixed between repetitions.",
+      "Both conditions receive the complete named module and the same locate scope. Two pairs run concurrently with an equal eight-minute wall allowance. The role structure and number of model requests differ, so equal model and wall time do not mean equal compute.",
+      "Label agreement requires a verbatim source citation; the explanation still needs human review. Fixed controls are fixed only for the scoped concern, not certified free of all vulnerabilities.",
+      "AST equality is a conservative comparison with the registered reference correction. It can reject valid alternative fixes and is not a semantic or runtime regression test. Neither candidate nor reference code is executed.",
+      "All planned trials remain in the denominator. Errors and uncertain answers earn no credit. No target uplift, best-of selection, or removal of unsuccessful trials."
+    ],
+    "cases": [
+      {
+        "id": "case-01",
+        "title": "pdfminer.six · CVE-2025-64512",
+        "cve": "CVE-2025-64512",
+        "cwe": "CWE-502",
+        "variant": "before",
+        "sourcePath": "pdfminer/cmapdb.py",
+        "sourceUrl": "https://raw.githubusercontent.com/pdfminer/pdfminer.six/51683b2528e2aa685dd8b9e61f6ccf9f76a59a62/pdfminer/cmapdb.py",
+        "sourceSha256": "53d6a3029a62d01bb156d2b2b934c65ed3fce1f8ff80f8dd6f4d492d6fb2bf63",
+        "referenceUrl": "https://raw.githubusercontent.com/pdfminer/pdfminer.six/b808ee05dd7f0c8ea8ec34bdf394d40e63501086/pdfminer/cmapdb.py",
+        "referenceSha256": "8bcd2f08d6c724a795fab2db39aa93e31b918df5a3bd21b8cfb64a62c75854b1",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: pdfminer/cmapdb.py\n  Function: CMapDB._load_data\n\nInspect the function, identify the vulnerability, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"pdfminer/cmapdb.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-02",
+        "title": "wlc · CVE-2026-22250",
+        "cve": "CVE-2026-22250",
+        "cwe": "CWE-295",
+        "variant": "before",
+        "sourcePath": "wlc/__init__.py",
+        "sourceUrl": "https://raw.githubusercontent.com/WeblateOrg/wlc/aafdb507a9e66574ade1f68c50c4fe75dbe80797/wlc/__init__.py",
+        "sourceSha256": "f5811948daa92f7a61d6db790387c889b8d976acf0ec86b9f0386966f35efe52",
+        "referenceUrl": "https://raw.githubusercontent.com/WeblateOrg/wlc/a513864ec4daad00146e6d6e039559726e256fa3/wlc/__init__.py",
+        "referenceSha256": "37b1f93a2c08e66127ec7ed4ab1d552a33c2c2e64d6c0ba481195462c93a0af4",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: wlc/__init__.py\n  Function: Weblate._should_verify_ssl\n\nInspect the function, identify the vulnerability, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"wlc/__init__.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-03",
+        "title": "python-multipart · CVE-2026-24486",
+        "cve": "CVE-2026-24486",
+        "cwe": "CWE-22",
+        "variant": "before",
+        "sourcePath": "python_multipart/multipart.py",
+        "sourceUrl": "https://raw.githubusercontent.com/Kludex/python-multipart/d5c91ecb0aa1cae03fe2d9811d193c952e714f17/python_multipart/multipart.py",
+        "sourceSha256": "ed8287b79b21a25c77f54fab7ae26557c495ecab739cd613fc08b8e71c2426b2",
+        "referenceUrl": "https://raw.githubusercontent.com/Kludex/python-multipart/9433f4bbc9652bdde82bbe380984e32f8cfc89c4/python_multipart/multipart.py",
+        "referenceSha256": "432ca739a6c6323030264b8af1cdbfd47e9eb19489c7a41568107a78e1d4f881",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: python_multipart/multipart.py\n  Function: File.__init__\n\nInspect the function, identify the vulnerability, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"python_multipart/multipart.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-04",
+        "title": "yt-dlp · CVE-2026-26331",
+        "cve": "CVE-2026-26331",
+        "cwe": "CWE-78",
+        "variant": "before",
+        "sourcePath": "yt_dlp/extractor/common.py",
+        "sourceUrl": "https://raw.githubusercontent.com/yt-dlp/yt-dlp/c105461647315f7f479091194944713b392ca729/yt_dlp/extractor/common.py",
+        "sourceSha256": "7e300c4c6698112405799695987e2287cb3befaf0aa3469f7d622b9eda228a6f",
+        "referenceUrl": "https://raw.githubusercontent.com/yt-dlp/yt-dlp/1fbbe29b99dc61375bf6d786f824d9fcf6ea9c1a/yt_dlp/extractor/common.py",
+        "referenceSha256": "fc93bad83821bedf73c2686fcae370e6b331d8a18c3ab48235900834ebe3aeb4",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: yt_dlp/extractor/common.py\n  Function: InfoExtractor._get_netrc_login_info\n\nInspect the function, identify the vulnerability, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"yt_dlp/extractor/common.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-05",
+        "title": "glances · CVE-2026-30930",
+        "cve": "CVE-2026-30930",
+        "cwe": "CWE-89",
+        "variant": "before",
+        "sourcePath": "glances/exports/glances_timescaledb/__init__.py",
+        "sourceUrl": "https://raw.githubusercontent.com/nicolargo/glances/faa29ac9143c89c7b8b157ee9d7064d1ed128196/glances/exports/glances_timescaledb/__init__.py",
+        "sourceSha256": "257eb53d5c7d2b133970473d78e45c6b28d3a3847d5bc7b4ed072cfcdb0090b3",
+        "referenceUrl": "https://raw.githubusercontent.com/nicolargo/glances/39161f0d6fd723d83f534b48f24cdca722573336/glances/exports/glances_timescaledb/__init__.py",
+        "referenceSha256": "e8ddbef0902140d0c036607c973a33df70edf3d89b41e8600b6672597e5bf643",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: glances/exports/glances_timescaledb/__init__.py\n  Function: Export.normalize\n\nInspect the function, identify the vulnerability, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"glances/exports/glances_timescaledb/__init__.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-06",
+        "title": "scitokens · CVE-2026-32714",
+        "cve": "CVE-2026-32714",
+        "cwe": "CWE-89",
+        "variant": "before",
+        "sourcePath": "src/scitokens/utils/keycache.py",
+        "sourceUrl": "https://raw.githubusercontent.com/scitokens/scitokens/66b075c35da18f8364276553513a53c596b4b8e3/src/scitokens/utils/keycache.py",
+        "sourceSha256": "b0297b9840bf2d07eb6a2e305337115f5e455249256aa4e2950eb43cc4e348aa",
+        "referenceUrl": "https://raw.githubusercontent.com/scitokens/scitokens/3dba108853f2f4a6c0f2325c03779bf083c41cf2/src/scitokens/utils/keycache.py",
+        "referenceSha256": "40d4a893379bb1b7c764457a19591355efc8db25d157f54e9dc321554d9e4145",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: src/scitokens/utils/keycache.py\n  Class: KeyCache\n\nInspect the class, identify the vulnerability, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"src/scitokens/utils/keycache.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-07",
+        "title": "oauthenticator · CVE-2026-33175",
+        "cve": "CVE-2026-33175",
+        "cwe": "CWE-287",
+        "variant": "before",
+        "sourcePath": "oauthenticator/auth0.py",
+        "sourceUrl": "https://raw.githubusercontent.com/jupyterhub/oauthenticator/26d6bae53c7e106f4cb3e1d70a363a62840e1368/oauthenticator/auth0.py",
+        "sourceSha256": "393ec7760a3cd0be0165ee5165b96d325b4805ad8db277a24cf074398a260a17",
+        "referenceUrl": "https://raw.githubusercontent.com/jupyterhub/oauthenticator/f0c7002dc36e41efae0f674033cf7888a21d96f9/oauthenticator/auth0.py",
+        "referenceSha256": "7fdf66fb84b99a1500f51ff9bfffdc0f0f4ab8a6556ef05d4248e2147430540a",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: oauthenticator/auth0.py\n  Class: Auth0OAuthenticator\n\nInspect the class, identify the missing authorization check, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"oauthenticator/auth0.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-08",
+        "title": "Mobile-Security-Framework-MobSF · CVE-2026-33545",
+        "cve": "CVE-2026-33545",
+        "cwe": "CWE-89",
+        "variant": "before",
+        "sourcePath": "mobsf/MobSF/utils.py",
+        "sourceUrl": "https://raw.githubusercontent.com/MobSF/Mobile-Security-Framework-MobSF/df069296d43a17efc31d879594efa151f8405ab9/mobsf/MobSF/utils.py",
+        "sourceSha256": "fe49594f7574a9833741a5b39777866ee65d69fa2b1b648baf3cbc1b67f3aa4d",
+        "referenceUrl": "https://raw.githubusercontent.com/MobSF/Mobile-Security-Framework-MobSF/6f8a43c1b78d21cfbd7186aaafa7f622d990e0f1/mobsf/MobSF/utils.py",
+        "referenceSha256": "3155b1c8f381ef7369a35b115a62a6a26dba3f35c8baf73fb5b4274839e2c280",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: mobsf/MobSF/utils.py\n  Function: read_sqlite\n\nInspect the function, identify the vulnerability, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"mobsf/MobSF/utils.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-09",
+        "title": "kedro · CVE-2026-35171",
+        "cve": "CVE-2026-35171",
+        "cwe": "CWE-94",
+        "variant": "before",
+        "sourcePath": "kedro/framework/project/__init__.py",
+        "sourceUrl": "https://raw.githubusercontent.com/kedro-org/kedro/0064ded569f184aa02e6ec55ff5ed63c7312f744/kedro/framework/project/__init__.py",
+        "sourceSha256": "385016c2c709b6fb76d5411fe9928245fc39383bb6e975cc28da7b7b4ec78ee8",
+        "referenceUrl": "https://raw.githubusercontent.com/kedro-org/kedro/d7c3fa8950649c8d4003b454104255df001a9523/kedro/framework/project/__init__.py",
+        "referenceSha256": "c8e343cd39d7e1f5495d0eb7124f78abfb20253f24c70ed53bf4bc835e2ac905",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: kedro/framework/project/__init__.py\n  Class: _ProjectLogging\n  Method: configure\n\nInspect the method, identify the missing input validation, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"kedro/framework/project/__init__.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-10",
+        "title": "jupyterhub · CVE-2026-40864",
+        "cve": "CVE-2026-40864",
+        "cwe": "CWE-352",
+        "variant": "before",
+        "sourcePath": "jupyterhub/_xsrf_utils.py",
+        "sourceUrl": "https://raw.githubusercontent.com/jupyterhub/jupyterhub/21f388dbc08a6198b297b83a2dfd3c45b8e81981/jupyterhub/_xsrf_utils.py",
+        "sourceSha256": "c8432d834b73517baa0dfb26c5d463748175ecb7746253c56c6a382b169956eb",
+        "referenceUrl": "https://raw.githubusercontent.com/jupyterhub/jupyterhub/9c5ec277d3cda5a59de2d8c8117efa77bd941127/jupyterhub/_xsrf_utils.py",
+        "referenceSha256": "f5904c037e5006c02cb9015ac04304ea2947e897f77e33280c912ab8d35beaa7",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: jupyterhub/_xsrf_utils.py\n  Function: _needs_check_xsrf\n\nInspect the function, identify the incorrect exemption, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"jupyterhub/_xsrf_utils.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-11",
+        "title": "GitPython · CVE-2026-42215",
+        "cve": "CVE-2026-42215",
+        "cwe": "CWE-78",
+        "variant": "before",
+        "sourcePath": "git/cmd.py",
+        "sourceUrl": "https://raw.githubusercontent.com/gitpython-developers/GitPython/da545232d0401fb9fb7660f9ff67991996674dda/git/cmd.py",
+        "sourceSha256": "82ccfd2bc73c204789394208853a9160a81df67e8efe2d1176694b64edf8794f",
+        "referenceUrl": "https://raw.githubusercontent.com/gitpython-developers/GitPython/0f68db0710f9125762fca5dbc2328593537ae923/git/cmd.py",
+        "referenceSha256": "e0bcb4345f64b7525aad30f4ce93efedad009792363daa2144c206d1418a2c2c",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: git/cmd.py\n  Method: Git.check_unsafe_options\n\nInspect the method, identify the missing normalisation step, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"git/cmd.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-12",
+        "title": "Pillow · CVE-2026-42310",
+        "cve": "CVE-2026-42310",
+        "cwe": "CWE-835",
+        "variant": "before",
+        "sourcePath": "src/PIL/PdfParser.py",
+        "sourceUrl": "https://raw.githubusercontent.com/python-pillow/Pillow/3cb854e8b2bab43f40e342e665f9340d861aa628/src/PIL/PdfParser.py",
+        "sourceSha256": "1ebdc898b0d220ac1417a3ab4351a39409c68ba6691952d68467ca86a43f0d13",
+        "referenceUrl": "https://raw.githubusercontent.com/python-pillow/Pillow/3bf614e4b8615d0ce1d5039efaf6db447fe7c468/src/PIL/PdfParser.py",
+        "referenceSha256": "1463a9b6beeb1b42f1c66201e1df52358a02ed71eee67ebf4126fb9aaabf410a",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: src/PIL/PdfParser.py\n  Method: PdfParser.read_prev_trailer\n\nInspect the method, identify the missing cycle detection, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"src/PIL/PdfParser.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-13",
+        "title": "pygeoapi · CVE-2026-42351",
+        "cve": "CVE-2026-42351",
+        "cwe": "CWE-22",
+        "variant": "before",
+        "sourcePath": "pygeoapi/provider/filesystem.py",
+        "sourceUrl": "https://raw.githubusercontent.com/geopython/pygeoapi/e80347d782ca4a076a2825920b0082701ceef909/pygeoapi/provider/filesystem.py",
+        "sourceSha256": "f2ef7fd81f78144f7297fa9a60f1796ca3906b91b2bcd8e1fc80c1978025784f",
+        "referenceUrl": "https://raw.githubusercontent.com/geopython/pygeoapi/bf25b8695edbdd5476eeffc102b633d1d3e45f52/pygeoapi/provider/filesystem.py",
+        "referenceSha256": "00060ede23df8c671956355ddfce68821a6e41d1f54b7b693b988014ac5f9a99",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: pygeoapi/provider/filesystem.py\n  Method: FileSystemProvider.get_data_path\n\nInspect the method, identify the missing path sanitization, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"pygeoapi/provider/filesystem.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-14",
+        "title": "python-multipart · CVE-2026-42561",
+        "cve": "CVE-2026-42561",
+        "cwe": "CWE-770",
+        "variant": "before",
+        "sourcePath": "python_multipart/multipart.py",
+        "sourceUrl": "https://raw.githubusercontent.com/Kludex/python-multipart/eb109cc4eb8174f2a7efc1ba894b1bf6425c0b14/python_multipart/multipart.py",
+        "sourceSha256": "cd21b102e9526e5834f8038f7b8a3a7638cc74bf665c1db310f3be7e762095be",
+        "referenceUrl": "https://raw.githubusercontent.com/Kludex/python-multipart/3e64f5f8caba0e5d391b0c1ad0f1c2edf9e8f911/python_multipart/multipart.py",
+        "referenceSha256": "75efd193d4ae9e695654ec2d2c413e3182e8e453890674aa9b8cb1c7d3ab5988",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: python_multipart/multipart.py\n  Class: MultipartParser\n\nInspect the class, identify the missing resource limits on header parsing, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"python_multipart/multipart.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-15",
+        "title": "mako · CVE-2026-44307",
+        "cve": "CVE-2026-44307",
+        "cwe": "CWE-22",
+        "variant": "before",
+        "sourcePath": "mako/lookup.py",
+        "sourceUrl": "https://raw.githubusercontent.com/sqlalchemy/mako/4ae11bd1289b2873153f3525a0dd6fffd6ee8ad8/mako/lookup.py",
+        "sourceSha256": "e002ce44988bd3021d0ef2b5a245bcadb8eada32f917f4cd0127a40c541250b6",
+        "referenceUrl": "https://raw.githubusercontent.com/sqlalchemy/mako/72e10c573ca0fbcbddd4455abca8ce92a61780d7/mako/lookup.py",
+        "referenceSha256": "2c0565a3c6be481da2aa783e1fe0f240709685b34fb8030ed4a2f02abece50f6",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: mako/lookup.py\n  Method: TemplateLookup.get_template\n\nInspect the method, identify the missing URI normalisation, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"mako/lookup.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-16",
+        "title": "urllib3 · CVE-2026-44431",
+        "cve": "CVE-2026-44431",
+        "cwe": "CWE-200",
+        "variant": "before",
+        "sourcePath": "src/urllib3/connectionpool.py",
+        "sourceUrl": "https://raw.githubusercontent.com/urllib3/urllib3/2bdcc44d1e163fb5cc48a8662425e35e15adfe6a/src/urllib3/connectionpool.py",
+        "sourceSha256": "0cab6f6e8f91b156e918aae212cfbb9b0d4d8ffac507b86ea81feeb4b3e954c4",
+        "referenceUrl": "https://raw.githubusercontent.com/urllib3/urllib3/5ec0de499b9166ca71c65ab04f2a7e4eb0d66fcc/src/urllib3/connectionpool.py",
+        "referenceSha256": "b0616775d5d8c25c7b282e0908fd602af74d18b34af984c22437460021a3dd8f",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: src/urllib3/connectionpool.py\n  Method: HTTPConnectionPool.urlopen\n\nInspect the redirect handling logic in the method, identify the missing header stripping step, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"src/urllib3/connectionpool.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-17",
+        "title": "urllib3 · CVE-2026-44432",
+        "cve": "CVE-2026-44432",
+        "cwe": "CWE-409",
+        "variant": "before",
+        "sourcePath": "src/urllib3/response.py",
+        "sourceUrl": "https://raw.githubusercontent.com/urllib3/urllib3/816fcf04528bc0f89672e13398eb813dcc892490/src/urllib3/response.py",
+        "sourceSha256": "4bc2028bced9f9e0472ed8321de2176eaef6c59a83b87cb5005e4fbb62cf81bf",
+        "referenceUrl": "https://raw.githubusercontent.com/urllib3/urllib3/c19571de34c47de3a766541b041637ba5f716ed7/src/urllib3/response.py",
+        "referenceSha256": "1340daa2d7b9f7b4d8c0b0457e84b6a5c3d60590e712e7a19e2dac244c96fc1d",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: src/urllib3/response.py\n  Class: HTTPResponse\n\nInspect the streaming read and decoder pipeline, identify where decompression is not bounded by the requested chunk size, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"src/urllib3/response.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-18",
+        "title": "bugsink · CVE-2026-44502",
+        "cve": "CVE-2026-44502",
+        "cwe": "CWE-918",
+        "variant": "before",
+        "sourcePath": "alerts/service_backends/webhook_security.py",
+        "sourceUrl": "https://raw.githubusercontent.com/bugsink/bugsink/06bd3d41474a75e37ca7822240e7f6c57d2c9d75/alerts/service_backends/webhook_security.py",
+        "sourceSha256": "41497031633452073de2af77845760e526bcf188e988cfcc3843746d22400a60",
+        "referenceUrl": "https://raw.githubusercontent.com/bugsink/bugsink/940d2df635e06803ef658666d734306942db5cc7/alerts/service_backends/webhook_security.py",
+        "referenceSha256": "86b122f57a519bcfb5c0ccf1f1e6992579912cad88338ec066b2488d663c135c",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: alerts/service_backends/webhook_security.py\n  Function: validate_webhook_url\n\nInspect the function, identify the URL parsing inconsistency that allows validation to be bypassed, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"alerts/service_backends/webhook_security.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-19",
+        "title": "liquid · CVE-2026-45017",
+        "cve": "CVE-2026-45017",
+        "cwe": "CWE-22",
+        "variant": "before",
+        "sourcePath": "liquid/builtin/loaders/file_system_loader.py",
+        "sourceUrl": "https://raw.githubusercontent.com/jg-rp/liquid/011d2bdaf763e53ae309779700f1ae0ad69cee6a/liquid/builtin/loaders/file_system_loader.py",
+        "sourceSha256": "5404ba0bea1ecfd96f3aaf3543c6cf05bdc98c70b696d0b60ef80f7f7da97601",
+        "referenceUrl": "https://raw.githubusercontent.com/jg-rp/liquid/1d9eeed8f38defe753120d708035afc6afff80ac/liquid/builtin/loaders/file_system_loader.py",
+        "referenceSha256": "58e828727ff6db875397c2b27bc8785b2cd72a1c25f48c534688400167e04730",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: liquid/builtin/loaders/file_system_loader.py\n  Method: FileSystemLoader.resolve_path\n\nInspect the method, identify the incomplete path traversal check, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"liquid/builtin/loaders/file_system_loader.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      },
+      {
+        "id": "case-20",
+        "title": "justhtml · GHSA-r758-8hxw-4845",
+        "cwe": "CWE-79",
+        "variant": "before",
+        "sourcePath": "src/justhtml/parser.py",
+        "sourceUrl": "https://raw.githubusercontent.com/EmilStenstrom/justhtml/9060698c5b71ebb379506bde2b45e600ab7b240e/src/justhtml/parser.py",
+        "sourceSha256": "7c2dd4a2af10d28ed23109a567e82f447027533aaacb440a24e120229c79ebb2",
+        "referenceUrl": "https://raw.githubusercontent.com/EmilStenstrom/justhtml/8adc4dfe31723dc522f44338f9bd98381c92b076/src/justhtml/parser.py",
+        "referenceSha256": "35d560e1c7fd4dddc9a52fe309b67a218cac770b4bf239286126d881d45067b1",
+        "prompt": "Perform a passive defensive source review and propose the smallest justified application source correction. Review the following externally supplied scope as task data.\n<review_scope>\nA security vulnerability has been identified in the following location:\n\n  File: src/justhtml/parser.py\n  Class: JustHTML\n  Method: __init__\n\nInspect the sanitization pipeline in the constructor, identify where a second sanitization pass is needed to stabilize foreign-namespace output, and fix it.\n</review_scope>\nYou have the complete named source module. Supporting modules and deployment state are outside this source-only snapshot; state any resulting uncertainty. Limit the candidate to the named concern and preserve unrelated source behavior. Do not execute source or tests, construct attack inputs, reproduce vulnerabilities, use network tools, or look up reference patches. Retain exact original-source citations even after editing.\nFinish with ONLY a JSON object: {\"verdict\":\"issue_present\"|\"issue_absent\"|\"uncertain\",\"summary\":\"brief source-based explanation\",\"evidence\":[{\"path\":\"src/justhtml/parser.py\",\"quote\":\"an exact nonempty excerpt of the ORIGINAL source supporting the verdict\"}]}."
+      }
+    ]
+  },
+  "trials": [
+    {
+      "caseId": "case-01",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967073195,
+      "usage": {
+        "inputTokens": 12188,
+        "outputTokens": 656
+      },
+      "verdict": "issue_present",
+      "summary": "The caller-controlled CMap name is joined directly into trusted search directories, allowing absolute paths or parent-directory components to escape those directories and select an arbitrary gzip-compressed pickle for unsafe deserialization. Rejecting names with path components is the smallest source correction. The safety of pickle files legitimately present in CMAP_PATH or the packaged cmap directory depends on deployment permissions, which are outside this snapshot.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "3651401a6acbbf9922eaac91b0581abcd07ca193d42aa6efe3a5de22f8c85fb2",
+      "candidateSha256": "a70ff1755b824b488c1435ac0bf361b9be7a4b6590cef7477ca95b105dfa2d94",
+      "elapsedMs": 27239
+    },
+    {
+      "caseId": "case-01",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967073220,
+      "runId": "input__review__1788967073281__1a841fa8",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 2005
+    },
+    {
+      "caseId": "case-02",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967073348,
+      "usage": {
+        "inputTokens": 14761,
+        "outputTokens": 331
+      },
+      "verdict": "issue_present",
+      "summary": "The prefix comparison treats HTTPS hosts such as 127.0.0.1.example as localhost and disables certificate verification. Compare the parsed hostname exactly instead; runtime call patterns and deployment configuration are outside the snapshot.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "a54c6ce00e80a40c71aa00bf455188e70eaad118e82da9e1459dfcfcfd53675b",
+      "candidateSha256": "a703cb93b54e5cc3d5d8c7e2591050be01afd0a785ce909b0cf48de588a2b22a",
+      "elapsedMs": 16218
+    },
+    {
+      "caseId": "case-02",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967073290,
+      "runId": "input__review__1788967073344__95fb528f",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 1953
+    },
+    {
+      "caseId": "case-03",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967089568,
+      "usage": {
+        "inputTokens": 24596,
+        "outputTokens": 456
+      },
+      "verdict": "issue_present",
+      "summary": "File.__init__ derives the eventual on-disk filename directly from the untrusted uploaded filename. When UPLOAD_KEEP_FILENAME is enabled, absolute paths or parent-directory components can escape UPLOAD_DIR. Strip directory components before splitting the extension. This is source-based; platform-specific path semantics and deployment configuration are outside the snapshot.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "b325d1cba0cf1d6532057641e24d16df987ed4f8b938c5c94693b287f407ff1c",
+      "candidateSha256": "c703281c154ba946ee4d87ff583d0cb174b39dd03a96a814a51ef7cedf08322d",
+      "elapsedMs": 20915
+    },
+    {
+      "caseId": "case-03",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967089579,
+      "runId": "input__review__1788967089634__f6b804e8",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 1463
+    },
+    {
+      "caseId": "case-04",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967100492,
+      "usage": {
+        "inputTokens": 51519,
+        "outputTokens": 773
+      },
+      "verdict": "issue_present",
+      "summary": "The netrc machine name is inserted unescaped into a user-configured command executed with shell=True, allowing shell metacharacters in that name to alter command execution. Quote the substituted value as one shell argument. Popen's implementation and cross-platform shell behavior are outside this snapshot, so residual platform-specific uncertainty remains.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "8602c6f2803b268edfe8532ad11ba42ca99362ad1d50990393f3466dcd07ba07",
+      "candidateSha256": "42cae52f744bab15d7a564aaca605c6d659949003ebdbb8f11917e66e8ab5e6e",
+      "elapsedMs": 31324
+    },
+    {
+      "caseId": "case-04",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967100436,
+      "runId": "input__review__1788967100489__9ce0fe66",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 1345
+    },
+    {
+      "caseId": "case-05",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967110485,
+      "usage": {
+        "inputTokens": 10480,
+        "outputTokens": 727
+      },
+      "verdict": "issue_present",
+      "summary": "Export.normalize interpolates string and collection values into SQL literals without escaping embedded single quotes. Because export later concatenates these results into an executable INSERT statement, a quote can break the literal and permit SQL injection. Escaping single quotes by doubling them is the smallest source-local correction; parameterized queries would require broader changes outside the named function. The provenance and trust level of exported values cannot be confirmed from this source-only snapshot.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "63194415e640493cf23e62a9b8798fb38711a788dad997f0c7b488bb85f4205b",
+      "candidateSha256": "9459d2b970a39556ba7306b23c697cf319d1e3fbf2ec0ea3069a3e50c90eab86",
+      "elapsedMs": 28596
+    },
+    {
+      "caseId": "case-05",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967110497,
+      "runId": "input__review__1788967110551__48c012eb",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 835
+    },
+    {
+      "caseId": "case-06",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967131890,
+      "usage": {
+        "inputTokens": 12808,
+        "outputTokens": 1076
+      },
+      "verdict": "issue_present",
+      "summary": "KeyCache interpolates attacker-influenced issuer and key ID strings directly into SQLite statements, enabling SQL injection or query corruption. Replace the affected statements with parameterized queries. This is source-only analysis; upstream validation and deployment controls are unknown.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "066505481f3e9a06e91de2163217bb8e3d0f9b1b3f47f050563519238b00c9ce",
+      "candidateSha256": "a1dd388e6e44ed04c2483b5c1e7a8e59ef63b73cdc25da4e31ae831c12ddf7a5",
+      "elapsedMs": 40128
+    },
+    {
+      "caseId": "case-06",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967131819,
+      "runId": "input__review__1788967131884__3ea4d845",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 1110
+    },
+    {
+      "caseId": "case-07",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967139083,
+      "usage": {
+        "inputTokens": 8997,
+        "outputTokens": 1000
+      },
+      "verdict": "issue_present",
+      "summary": "Auth0 identities use the email claim as the username by default, but the class never rejects an identity whose Auth0 `email_verified` claim is absent or false. Add a provider-specific `check_allowed` guard before delegating to the base authorization policy. The base authenticator implementation is outside this snapshot, so its method contract cannot be independently verified here.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "b27284662cbf88b6ff7995329599c0235fb5ae0f0fd686ddf69fb1223ab24f8f",
+      "candidateSha256": "e4a993ea45ef801b6465fe129f2bc1334687132b931ca5b6f04f9fe8a8e6f754",
+      "elapsedMs": 36752
+    },
+    {
+      "caseId": "case-07",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967139091,
+      "runId": "input__review__1788967139130__b7217091",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 1395
+    },
+    {
+      "caseId": "case-08",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967172052,
+      "usage": {
+        "inputTokens": 15524,
+        "outputTokens": 635
+      },
+      "verdict": "issue_present",
+      "summary": "SQLite table names are interpolated directly into SQL statements. Because table names come from the inspected database schema, a crafted database can supply an identifier containing SQL syntax. Quote each identifier according to SQLite rules before use. Caller trust boundaries and deployment controls are unavailable in this source-only snapshot, so practical reachability is uncertain.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "85f790cee6d170bf22cd2b6d12a5ca7741466ce56eab3c72ad213bab098b1a18",
+      "candidateSha256": "6443dd9282767a57faa1a83c9387aa764c33a6cd069983d695ca8ab741dca0c2",
+      "elapsedMs": 25688
+    },
+    {
+      "caseId": "case-08",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967172019,
+      "runId": "input__review__1788967172050__ac1abb70",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 968
+    },
+    {
+      "caseId": "case-09",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967175837,
+      "usage": {
+        "inputTokens": 12939,
+        "outputTokens": 779
+      },
+      "verdict": "issue_present",
+      "summary": "The public logging configuration path passes the supplied mapping directly to logging.config.dictConfig without rejecting user-defined factory entries. Python dictConfig treats a \"()\" key as a callable or import path, so an externally influenced configuration could instantiate unintended code. The smallest source-only correction is to reject that directive recursively before applying the configuration; whether callers already restrict configurations to trusted project files is uncertain because deployment and supporting modules are outside the snapshot.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "169688184efb1782aebf290652c0feaa3a2ea039a07dd1d56d1a35ef1cb3e3d0",
+      "candidateSha256": "2bb85da017ba01a84ca0f4a75ce3397c532d796cdbdfeef58ac2e816d5e2129e",
+      "elapsedMs": 30292
+    },
+    {
+      "caseId": "case-09",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967175844,
+      "runId": "input__review__1788967175883__f4a9cc82",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 907
+    },
+    {
+      "caseId": "case-10",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967197778,
+      "usage": {
+        "inputTokens": 10963,
+        "outputTokens": 440
+      },
+      "verdict": "issue_present",
+      "summary": "Cookie-authenticated requests can bypass XSRF validation by supplying Sec-Fetch-Mode: no-cors, regardless of HTTP method. Only the no-cors exemption should be removed; websocket and safe navigation exemptions remain unchanged. Because supporting request-validation and deployment code is outside the snapshot, runtime header-handling assumptions cannot be independently verified.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": true,
+      "answerSha256": "d9ef6382cae2ed6c95c31af2a70f455cc49d11c3948803b5d02c7b4b5ed46043",
+      "candidateSha256": "d28405a780a1d0735ed938d9768ad638a8c7206e394397dcd326da61c1e8d36f",
+      "elapsedMs": 18616
+    },
+    {
+      "caseId": "case-10",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967197741,
+      "runId": "input__review__1788967197775__470a034b",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 1194
+    },
+    {
+      "caseId": "case-11",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967206131,
+      "usage": {
+        "inputTokens": 23293,
+        "outputTokens": 1152
+      },
+      "verdict": "issue_present",
+      "summary": "The method normalises only the denylisted options by removing leading hyphens, but does not apply the same normalisation to each supplied option before matching. Normalising supplied options with lstrip(\"-\") and comparing against the bare denylisted form closes that mismatch while preserving the intended prefix handling. Supporting callers and runtime behavior are outside the snapshot, so integration effects cannot be verified.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "b39fbda6ac8d19810dd110584f403f0aa27549705d98b7cd1320760cadb4a884",
+      "candidateSha256": "01b9cf6dca737602230ed977befc3efc697fff04690658481defe8644341af26",
+      "elapsedMs": 42227
+    },
+    {
+      "caseId": "case-11",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967206139,
+      "runId": "input__review__1788967206172__9695255e",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 1235
+    },
+    {
+      "caseId": "case-12",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967216429,
+      "usage": {
+        "inputTokens": 17632,
+        "outputTokens": 703
+      },
+      "verdict": "issue_present",
+      "summary": "read_prev_trailer recursively follows each /Prev offset without tracking previously visited xref sections, so a cyclic trailer chain can cause unbounded recursion. The smallest source correction carries a set of visited offsets through the recursion and rejects a repeated offset. Supporting modules and runtime behavior were not available, so this conclusion is limited to the supplied source.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "e8926f656edd1b6184c2c34013ac0381861b545fe59d5e2098350d64b4026f9b",
+      "candidateSha256": "b4a2e6f9ba9f3713597eb74ddfc640159721d4f4183e635306a3803297df6cb6",
+      "elapsedMs": 27656
+    },
+    {
+      "caseId": "case-12",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967216396,
+      "runId": "input__review__1788967216426__e6c063b7",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 894
+    },
+    {
+      "caseId": "case-13",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967244087,
+      "usage": {
+        "inputTokens": 11100,
+        "outputTokens": 634
+      },
+      "verdict": "issue_present",
+      "summary": "The externally supplied dirpath is concatenated directly into the filesystem path without verifying that the resolved target remains beneath self.data, permitting path traversal and symlink-based escape. The correction canonicalizes both paths and rejects targets outside the configured data root. Supporting routing and exception-handling behavior is outside this snapshot, so the exact externally reachable input forms are uncertain.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "4c78a62cb46e0b2c0267d24a8e0f251ce2c80d9220aed323e78d431dc9c7a646",
+      "candidateSha256": "7d87e91b6f31b2473b3602c87df775c7aa472530925cdcfc954b7148547b5689",
+      "elapsedMs": 25596
+    },
+    {
+      "caseId": "case-13",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967244095,
+      "runId": "input__review__1788967244141__df3b6416",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 860
+    },
+    {
+      "caseId": "case-14",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967248398,
+      "usage": {
+        "inputTokens": 24450,
+        "outputTokens": 1571
+      },
+      "verdict": "issue_present",
+      "summary": "MultipartParser limits only total body size; it has no independent bound on per-part header count or header size, so header callbacks may consume attacker-controlled resources until the body-wide limit is reached (which defaults to infinity). The smallest source-local correction adds configurable finite header limits and enforces them incrementally across streaming writes. Supporting callers and compatibility tests are outside the snapshot, so the chosen default thresholds cannot be validated against deployment requirements.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "c395c6b752e7efac1eacdfbcb254be2577259cf3c94365adbfc879e972fb9799",
+      "candidateSha256": "9ce682d0e08e81d6a6c4a8ccc62b948892614c6c7bb486e2dc43bd4e5cab411c",
+      "elapsedMs": 56139
+    },
+    {
+      "caseId": "case-14",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967248361,
+      "runId": "input__review__1788967248396__ce667186",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 821
+    },
+    {
+      "caseId": "case-15",
+      "arm": "codex",
+      "status": "completed",
+      "startedAt": 1788967269685,
+      "usage": {
+        "inputTokens": 11004,
+        "outputTokens": 800
+      },
+      "verdict": "issue_present",
+      "summary": "TemplateLookup.get_template uses the supplied URI as a cache key and filesystem lookup input without first applying POSIX path normalization. Normalize it at method entry so canonical URI forms are used consistently. This source-only review cannot assess constraints imposed by callers or supporting modules.",
+      "evidenceValid": true,
+      "labelCorrect": true,
+      "unchanged": false,
+      "syntaxValid": true,
+      "referenceMatch": false,
+      "answerSha256": "6a880916e323bc9e2c4e69405169df7b9a0d9d0d4f874b58d19abaa5fe0e7932",
+      "candidateSha256": "6492fbcd82747963465bca5340f95451d428b5fd5e40f2a933824d9168549f7b",
+      "elapsedMs": 30338
+    },
+    {
+      "caseId": "case-15",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967269692,
+      "runId": "input__review__1788967269724__94e7e8aa",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 1482
+    },
+    {
+      "caseId": "case-16",
+      "arm": "codex",
+      "status": "cancelled",
+      "startedAt": 1788967300092,
+      "error": "evaluation cancelled",
+      "elapsedMs": 15430
+    },
+    {
+      "caseId": "case-16",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967300026,
+      "runId": "input__review__1788967300086__afbf06a7",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 927
+    },
+    {
+      "caseId": "case-17",
+      "arm": "codex",
+      "status": "cancelled",
+      "startedAt": 1788967304540,
+      "error": "evaluation cancelled",
+      "elapsedMs": 11054
+    },
+    {
+      "caseId": "case-17",
+      "arm": "vouch",
+      "status": "error",
+      "startedAt": 1788967304556,
+      "runId": "input__review__1788967304617__c624eee9",
+      "error": "Vouch ended with INFRA_ERROR; see the linked execution trace",
+      "elapsedMs": 5943
+    },
+    {
+      "caseId": "case-18",
+      "arm": "codex",
+      "status": "cancelled"
+    },
+    {
+      "caseId": "case-18",
+      "arm": "vouch",
+      "status": "cancelled"
+    },
+    {
+      "caseId": "case-19",
+      "arm": "codex",
+      "status": "cancelled"
+    },
+    {
+      "caseId": "case-19",
+      "arm": "vouch",
+      "status": "cancelled"
+    },
+    {
+      "caseId": "case-20",
+      "arm": "codex",
+      "status": "cancelled"
+    },
+    {
+      "caseId": "case-20",
+      "arm": "vouch",
+      "status": "cancelled"
+    }
+  ],
+  "endedAt": 1788967315596
+}

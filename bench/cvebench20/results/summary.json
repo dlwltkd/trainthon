@@ -1,0 +1,61 @@
+{
+  "evaluationId": "cvebench20-1788967547319-52afab5d",
+  "recordSha256": "409b644c95b8fe8af345f3e4b31a446022d86a03497ec09be3dd8ad0b86961c3",
+  "manifestHash": "027c7b67e478fafa6424b24a6779b41277b0978f322a11ab22c43c74dc30b70b",
+  "cohortSha256": "cafd68a8af46e11a0e791724d91dd5f3d34518fc62e12d2ebd00f704bc80dce7",
+  "codeCommit": "e9731ce99e0386a089be1e404d8e647655aa9569",
+  "model": "gpt-5.6-sol",
+  "auditedCompletedTrials": 40,
+  "experimentElapsedMs": 1006510,
+  "arms": [
+    {
+      "arm": "codex",
+      "total": 20,
+      "completed": 20,
+      "errors": 0,
+      "correct": 19,
+      "referenceMatches": 1,
+      "controlsUnchanged": 0,
+      "accuracy": 0.95,
+      "referenceAccuracy": 0.05,
+      "elapsedMs": 669257,
+      "syntaxValid": 20,
+      "candidatesChanged": 20,
+      "medianElapsedMs": 31373.5,
+      "inputTokens": 328023,
+      "outputTokens": 16875,
+      "usageReportedTrials": 20
+    },
+    {
+      "arm": "vouch",
+      "total": 20,
+      "completed": 20,
+      "errors": 0,
+      "correct": 20,
+      "referenceMatches": 1,
+      "controlsUnchanged": 0,
+      "accuracy": 1,
+      "referenceAccuracy": 0.05,
+      "elapsedMs": 1944174,
+      "syntaxValid": 20,
+      "candidatesChanged": 19,
+      "medianElapsedMs": 90196.5,
+      "inputTokens": 4705403,
+      "outputTokens": 86953,
+      "usageReportedTrials": 20
+    }
+  ],
+  "complete": true,
+  "differencePp": 5.000000000000004,
+  "referenceDifferencePp": 0,
+  "relativeReferenceChangePercent": 0,
+  "relativeChangePercent": 5.263157894736847,
+  "vulnerableCases": 20,
+  "controlCases": 0,
+  "earlierExperiment": {
+    "id": "cvebench20-1788967073189-164565d9",
+    "status": "cancelled",
+    "reason": "Stopped after repeated first-request provider stream failures; no comparable score claimed.",
+    "recordSha256": "1fa1d0d1fd0961623c1317ebc423c8a8c564fcb3b82057791fcb56302b53b8b5"
+  }
+}

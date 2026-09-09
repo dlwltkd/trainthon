@@ -1,5 +1,7 @@
 # CVE-Bench source adaptation
 
+[Measured results and frozen records](RESULTS.md) · [Slide wording](SLIDE.md)
+
 ```bash
 pnpm cli eval --suite cvebench20 --prepare
 pnpm cli eval --suite cvebench20

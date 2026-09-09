@@ -31,9 +31,30 @@ an explicit action in the dashboard.
   configuration, usage, and correlated tool events. Watch a running CLI session in
   the dashboard or replay its recorded events.
 
-A live CVEfixes source pilot compares the same model in a disclosed Codex CLI
-configuration and the Vouch workflow. No general security-performance improvement
-is claimed. See [the cohort, grading policy, and limitations](bench/CVEFIXES.md).
+## Measured benchmark results
+
+On 10 September 2026, we completed all 40 paired trials on a pinned, source-only
+adaptation of 20 public CVE-Bench repair tasks. Both conditions requested
+`gpt-5.6-sol` and received the same named source modules and task prompts.
+
+| Measure | Codex CLI, source-only | Vouch, Red → Blue |
+| --- | ---: | ---: |
+| Exact module AST reference agreement | 1/20 (5%) | 1/20 (5%) |
+| Expected verdict with a verbatim source citation | 19/20 (95%) | 20/20 (100%) |
+| Completed trials | 20/20 | 20/20 |
+| Median trial time | 31.4 s | 90.2 s |
+
+The 5 percentage-point citation difference came from one altered character in a
+Codex source excerpt; both conditions identified all tasks as issue-present.
+It is an evidence-format difference, not an improvement in vulnerability
+detection. Exact patch-reference agreement was equal. No runtime security or
+regression tests were run, and this comparison does not establish a general
+cybersecurity-performance gain or results for unrestricted default Codex.
+
+See the [full results and frozen records](bench/cvebench20/RESULTS.md),
+[slide-ready wording](bench/cvebench20/SLIDE.md), and
+[synthetic development results](bench/development20/RESULTS.md).
+The earlier [CVEfixes source pilot](bench/CVEFIXES.md) is retained separately.
 
 ## How it's built
 
@@ -48,8 +69,7 @@ The framework builds on the existing packages:
 The engine has explicit source-review, repository-repair, and prepared-benchmark
 entry points.
 `apps/server` provides the local Hono API and SSE event stream; `apps/dashboard`
-provides the React/Vite repository and activity view. The Bench comparison
-interface remains planned.
+provides the React/Vite repository, activity, and benchmark evidence views.
 
 See [`SECURITY_FRAMEWORK.md`](./SECURITY_FRAMEWORK.md) for the shared architecture
 contract and the boundary between the framework and each workflow. The current
