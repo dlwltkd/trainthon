@@ -41,7 +41,7 @@ export interface SourceEvaluation {
   endedAt?: number;
   manifestHash: string;
   manifest: {
-    suite: "cvefixes-source-pilot-v1";
+    suite: "cvefixes-source-pilot-v1" | "cvefixes-source-pilot-v2";
     datasetUrl: string;
     cohortUrl: string;
     selection: string;
@@ -50,7 +50,7 @@ export interface SourceEvaluation {
     codexVersion: string;
     maxWallMs: number;
     cumulativeTokenLimit: null;
-    vouchMaxSteps: number;
+    vouchMaxSteps: number | null;
     seed: number;
     grader: "python-ast-reference-v1";
     runtimeTests: false;

@@ -11,7 +11,9 @@ The cohort comes from [CVEfixes' official examples](https://github.com/secureIT-
 
 Codex runs in a disclosed source-only configuration: the full file is supplied in the prompt; shell, web, apps, host skills, and other tools are disabled; its structured replacements are applied by the evaluator. Vouch uses its production Red review and Blue validation/repair workflow with file tools and skills. Red observes the baseline; Blue edits a separate source workspace. These are capability boundaries, not separate operating-system containers. Neither condition executes the downloaded code.
 
-The task prompt, model identifier, source, and eight-minute total wall-time allowance are shared. Cumulative tokens are not capped. Vouch has 40 model steps shared by its roles; Codex uses its native response lifecycle. Input presentation, model-call counts, and reasoning defaults differ, so this pilot does not establish a comparison against unrestricted default Codex at equal compute.
+The task prompt, model identifier, source, and eight-minute total wall-time allowance are shared. Cumulative tokens are not capped. Vouch v2 has no cumulative step ceiling; Codex uses its native response lifecycle. Input presentation, model-call counts, and reasoning defaults differ, so this pilot does not establish a comparison against unrestricted default Codex at equal compute.
+
+The first completed v1 experiment recorded 3/4 label agreement for Codex and 2/4 for Vouch, including a Vouch repair that stopped at its shared 40-step ceiling. V2 removes that cutoff from production prompt workflows and the pilot while preserving all original cases, prompts, grading, and earlier records. It is explicitly a development-set re-evaluation after inspecting v1, not a held-out benchmark. Neither version establishes a claimed 14% advantage.
 
 The deterministic grader records:
 

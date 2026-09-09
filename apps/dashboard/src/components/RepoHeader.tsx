@@ -75,11 +75,13 @@ export function RepoHeader({
         <Stat icon={<Timer className="size-3.5" />} label="elapsed" value={formatClock(elapsed)}>
           {budgets && <Meter value={elapsed} max={budgets.maxWallMs} tone={elapsed / budgets.maxWallMs > 0.85 ? "warn" : "info"} />}
         </Stat>
-        <Stat icon={<Cpu className="size-3.5" />} label="steps" value={`${view.usage.steps}${budgets ? ` / ${budgets.maxSteps}` : ""}`}>
-          {budgets && <Meter value={view.usage.steps} max={budgets.maxSteps} />}
+        <Stat icon={<Cpu className="size-3.5" />} label="steps" value={`${view.usage.steps}${budgets && budgets.maxSteps < Number.MAX_SAFE_INTEGER / 2 ? ` / ${budgets.maxSteps}` : ""}`}>
+          {budgets && budgets.maxSteps < Number.MAX_SAFE_INTEGER / 2 && <Meter value={view.usage.steps} max={budgets.maxSteps} />}
+          {budgets && budgets.maxSteps >= Number.MAX_SAFE_INTEGER / 2 && <span className="text-[0.7em] text-ink-3">No step ceiling</span>}
         </Stat>
-        <Stat icon={<Coins className="size-3.5" />} label={view.usageKnown === false ? "token estimate" : "run tokens"} value={`${formatTokens(view.usage.tokens)}${budgets ? ` / ${formatTokens(budgets.maxTokens)}` : ""}`} hint={view.usageKnown !== false && view.endedAt ? formatCost(view.costUsd) : undefined}>
-          {budgets && <Meter value={view.usage.tokens} max={budgets.maxTokens} />}
+        <Stat icon={<Coins className="size-3.5" />} label={view.usageKnown === false ? "token estimate" : "run tokens"} value={`${formatTokens(view.usage.tokens)}${budgets && budgets.maxTokens < Number.MAX_SAFE_INTEGER / 2 ? ` / ${formatTokens(budgets.maxTokens)}` : ""}`} hint={view.usageKnown !== false && view.endedAt ? formatCost(view.costUsd) : undefined}>
+          {budgets && budgets.maxTokens < Number.MAX_SAFE_INTEGER / 2 && <Meter value={view.usage.tokens} max={budgets.maxTokens} />}
+          {budgets && budgets.maxTokens >= Number.MAX_SAFE_INTEGER / 2 && <span className="text-[0.7em] text-ink-3">No token ceiling</span>}
           {view.usageKnown === false && <span className="text-[0.7em] leading-tight text-ink-3" title="Token accounting includes conservative estimates where provider usage was unavailable.">Conservative accounting</span>}
         </Stat>
       </div>

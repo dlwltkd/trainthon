@@ -28,6 +28,14 @@ function controller(events: HarnessEvent[], overrides: Partial<RunController> = 
 }
 
 describe("run view agent trace integration", () => {
+  it("shows usage without enormous sentinel limits for unbounded prompt reviews", () => {
+    const view = deriveRun(trace({ type: "budget_update", tokens: 1234, usageKnown: true, steps: 41, elapsedMs: 1000 }))!;
+    view.budgets = { maxSteps: Number.MAX_SAFE_INTEGER, maxTokens: Number.MAX_SAFE_INTEGER, maxWallMs: 1_200_000 };
+    const html = renderToStaticMarkup(<RepoHeader view={view} source={null} now={1000} connection="recorded" playback="recorded" />);
+    expect(html).toContain("No step ceiling");
+    expect(html).toContain("No token ceiling");
+    expect(html).not.toContain(String(Number.MAX_SAFE_INTEGER));
+  });
   it("labels conservative budget accounting without presenting it as reported token use", () => {
     const view = deriveRun(trace(
       { type: "budget_update", tokens: 1234, usageKnown: false, steps: 3, elapsedMs: 1000 },

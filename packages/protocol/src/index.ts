@@ -422,8 +422,9 @@ export const DEFAULT_BUDGETS: Budgets = {
 /** Two-role repository reviews also account conservatively for gateways with missing usage. */
 export const DEFAULT_REPOSITORY_BUDGETS: Budgets = {
   ...DEFAULT_BUDGETS,
-  // Demo source reviews do not impose a cumulative token ceiling. Steps and
-  // wall time remain bounded so a stalled provider cannot run forever.
+  // Source workflows finish on evidence and validation; wall time still bounds
+  // stalled runs without cutting Blue off after Red consumes the shared steps.
   maxTokens: Number.MAX_SAFE_INTEGER,
+  maxSteps: Number.MAX_SAFE_INTEGER,
   maxWallMs: 20 * 60_000,
 };

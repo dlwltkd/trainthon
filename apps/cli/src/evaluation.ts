@@ -37,15 +37,16 @@ export async function runSourceEvaluation(flags: Record<string, string | boolean
     const dir = join(runsDir, "evaluations", id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const manifest: SourceEvaluation["manifest"] = {
-      suite: "cvefixes-source-pilot-v1", datasetUrl: "https://github.com/secureIT-project/CVEfixes", cohortUrl: COHORT_URL,
+      suite: "cvefixes-source-pilot-v2", datasetUrl: "https://github.com/secureIT-project/CVEfixes", cohortUrl: COHORT_URL,
       selection: "Two Python source-fix cases from the official example cohort, selected before any evaluation: CWE-93 and CWE-755. Each fixing commit and its first parent provide a paired before/fixed control. This is a convenience sample from one project, not the full CVEfixes release.",
-      model: "gpt-5.6-sol", codeCommit, codexVersion, maxWallMs: 8 * 60_000, cumulativeTokenLimit: null, vouchMaxSteps: 40, seed: 1,
+      model: "gpt-5.6-sol", codeCommit, codexVersion, maxWallMs: 8 * 60_000, cumulativeTokenLimit: null, vouchMaxSteps: null, seed: 1,
       grader: "python-ast-reference-v1", runtimeTests: false,
       conditions: {
         codex: "Native Codex CLI, source-only configuration: full file in the prompt, JSON replacements, tools/web/host skills disabled, read-only process workspace, provider defaults for reasoning. This is not unrestricted default Codex.",
         vouch: "Production Red review then Blue validation/repair, separate source workspaces, bounded file tools and skills, same model for both roles, provider defaults for reasoning. No source execution or tool network access.",
       },
       limitations: [
+        "Development pilot v2: the 40-step Vouch cutoff was removed after inspecting v1's incomplete repair. The cohort, prompts, grader, model, and wall-time allowance are unchanged. This is a development-set re-evaluation, not a held-out performance result. Earlier experiments remain available.",
         "Four snapshots from two CVEs in one project; correlated samples and possible model training contamination. No general security-performance claim or statistical significance is established.",
         "The task names the CWE and relevant functions. Baseline receives the whole file inline; Vouch reads it through tools. Model-call counts and reasoning defaults differ. Equal model and wall-time allowance do not mean equal compute.",
         "Label agreement requires a verbatim source citation; the explanation still needs human review. Fixed controls are fixed only for the scoped concern, not certified free of all vulnerabilities.",
@@ -86,7 +87,7 @@ export async function runSourceEvaluation(flags: Record<string, string | boolean
           const model = { model: manifest.model, provider: "openai" as const };
           const record = await executeRepositoryReview({ repoPath: repo, prompt: task.prompt, remediate: true, runsDir,
             model, reviewModel: model, seed: manifest.seed,
-            budgets: { maxTokens: Number.MAX_SAFE_INTEGER, maxSteps: manifest.vouchMaxSteps, maxWallMs: manifest.maxWallMs }, signal: controller.signal,
+            budgets: { maxTokens: Number.MAX_SAFE_INTEGER, maxSteps: manifest.vouchMaxSteps ?? Number.MAX_SAFE_INTEGER, maxWallMs: manifest.maxWallMs }, signal: controller.signal,
             onEvent: event => { if (event.type === "run_start") { trial.runId = event.runId; save(); } progress.onEvent(event); } });
           trial.runId = record.runId;
           if (record.usageKnown) trial.usage = { inputTokens: record.usage.inputTokens, outputTokens: record.usage.outputTokens };

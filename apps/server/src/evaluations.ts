@@ -16,7 +16,7 @@ export function readSourceEvaluation(runsDir: string, id: string): SourceEvaluat
     if (value.schemaVersion !== 1 || value.id !== id || !["running", "completed", "cancelled"].includes(value.status)
       || !Number.isFinite(value.createdAt) || !hashPattern.test(value.manifestHash)) return null;
     const manifest = value.manifest;
-    if (manifest?.suite !== "cvefixes-source-pilot-v1" || manifest.grader !== "python-ast-reference-v1" || manifest.runtimeTests !== false
+    if (!["cvefixes-source-pilot-v1", "cvefixes-source-pilot-v2"].includes(manifest?.suite) || manifest.grader !== "python-ast-reference-v1" || manifest.runtimeTests !== false
       || typeof manifest.model !== "string" || typeof manifest.codeCommit !== "string" || typeof manifest.codexVersion !== "string"
       || typeof manifest.conditions?.codex !== "string" || typeof manifest.conditions.vouch !== "string"
       || !Array.isArray(manifest.limitations) || manifest.limitations.some(item => typeof item !== "string")
