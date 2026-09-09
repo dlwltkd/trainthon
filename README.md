@@ -45,7 +45,7 @@ pnpm cli run --task proto-pollution --condition C --mode scripted
 ```
 
 The repository MVP accepts a local Git repository, a report, and a designated
-Vitest regression. Scripted mode is useful for a deterministic rehearsal:
+Vitest or pytest regression. Scripted mode is useful for a deterministic rehearsal:
 
 ```bash
 pnpm cli run \
@@ -92,25 +92,51 @@ pnpm cli run \
 ```
 
 Local runs snapshot the requested commit, overlay the supplied regression,
-install the project's locked dependencies in Docker, and run tests without
-network access. Only JS/TS application source can change. Local success is
+install the project's dependencies in Docker, and run tests without
+network access. Only JS/TS/Python application source can change. Local success is
 `TESTS_PASSED`, with verification scope `repository_tests` and
 `independentGrader: false`. It requires the exact regression and the functional
 suite to pass in a fresh copy; it is never reported as `FIXED_VERIFIED`.
 Artifacts are written below `runs/<runId>/` before cleanup.
 
 This slice supports Node projects with one npm or pnpm lockfile, Vitest 4–5,
-and Vite 6.1 or newer. It requires Node 22+, pnpm, Git, and Docker.
+and Vite 6.1 or newer, plus Python 3.11 projects with pytest 8–9. Vouch itself
+requires Node 22+, pnpm, Git, and Docker.
 Functional tests must live in conventional protected test paths; a collected
 test outside those paths is rejected during setup.
+
+For Python, use a `.py` regression path. The runner reads root
+`requirements-test.txt` (or `requirements.txt`), follows relative `-r` includes,
+and requires exact `name==version` pins, including pytest. It installs PyPI wheels
+without mounting repository code during setup. Editable installs, source builds,
+custom indexes, version ranges, and environment markers are unsupported.
+
+```bash
+pnpm cli run \
+  --repo /path/to/python-project \
+  --report /path/to/python-project/docs/security-report.md \
+  --regression tests/test_security.py \
+  --mode live
+```
+
+Pytest uses harness-owned configuration and disables plugin autoload. Existing
+`conftest.py` fixtures remain available and immutable; `TESTING=1` is set and
+dotenv loading is disabled. Test setup/import errors are recorded separately
+from failed assertions. Skipped or expected-failure regression cases cannot pass
+verification. Protected fixtures may be up to 8 MB each; source and supplied
+regression files remain capped at 2 MB, within a 30 MB / 3000-file snapshot.
 
 The dependency-install container has network access during preparation. Install
 scripts, pnpm hooks, linked/file/custom-tarball dependencies, and non-npmjs URLs
 in npm locks are rejected; dependency extraction is monitored at 750 MB and
 100,000 entries. Test containers have no network, return structured
 evidence through a bounded output channel, and use a read-only repository mount. Each record includes the
-pinned container digest, package-manager and Vitest/Vite versions, lockfile hash,
-resolved input hash, and before/after test manifests.
+pinned container digest, runner and package-manager versions, dependency input hash,
+resolved input hash, and before/after test manifests. Python records also include
+the resolved dependency versions and wheel SHA-256 hashes from the
+[pip installation report](https://pip.pypa.io/en/stable/reference/installation-report/).
+Transitive Python dependencies are resolved during setup and reused throughout
+the run; direct requirements pins alone do not lock them across future runs.
 
 The local MVP assumes the owner trusts the selected commit, lockfile, test runner,
 and tests. It uses immutable harness-owned test options: executable repository
@@ -118,9 +144,12 @@ Vitest/Vite configs and environment files are disabled, and PostCSS receives an
 empty inline configuration. Config-defined plugins, setup files, aliases, and
 custom test patterns are outside this slice.
 
-Editable application source runs in the same Vitest worker as the assertions. It
+Editable application source runs in the same test process as the assertions. It
 can overfit visible tests or alter assertion behavior, so passing results require
 code review and are not proof of a security fix. The separate hidden grader is
 available only on the benchmark path. Hiding tests does not prevent same-runtime
 tampering; isolating grader control from candidate code for adversarial evaluation
 remains future work. Local results do not count as benchmark performance.
+
+Run the optional Docker integration check for the Python adapter with
+`VOUCH_DOCKER_TESTS=1 pnpm exec vitest run packages/sandbox/src/python-project.test.ts`.

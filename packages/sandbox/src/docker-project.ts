@@ -1,10 +1,12 @@
-import { createHash, randomUUID } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
-import { runCommand, type ExecOptions, type ExecResult } from "./exec.js";
-import { localProcessEnv, readBoundedRegularFile, type LocalWorkspace } from "./local-workspace.js";
+import { type ExecResult } from "./exec.js";
+import { readBoundedRegularFile, type LocalWorkspace } from "./local-workspace.js";
+import { DockerSession, exceedsDirectoryLimit, type DockerInvoker } from "./docker-session.js";
+export type { DockerInvoker } from "./docker-session.js";
 
 export type TestSelection = "regression" | "functional";
 export interface StructuredTestResult {
@@ -21,7 +23,7 @@ export interface StructuredTestResult {
   testManifest: string[];
   reason?: string;
 }
-export interface ProjectRuntime {
+export interface VitestRuntime {
   adapter: "vitest";
   repositoryConfig: "disabled";
   image: string;
@@ -31,13 +33,25 @@ export interface ProjectRuntime {
   vitestVersion: string;
   viteVersion: string;
 }
+export interface PytestRuntime {
+  adapter: "pytest";
+  repositoryConfig: "disabled";
+  conftest: "immutable";
+  image: string;
+  requirementsFile: string;
+  requirementsHash: string;
+  packageManager: string;
+  pythonVersion: string;
+  pytestVersion: string;
+  dependencies: Array<{ name: string; version: string; sha256: string }>;
+}
+export type ProjectRuntime = VitestRuntime | PytestRuntime;
 export interface ProjectTestRunner {
   readonly runtime?: ProjectRuntime;
   prepare(workspace: LocalWorkspace, opts?: { signal?: AbortSignal; timeoutMs?: number }): Promise<void>;
   runTests(dir: string, selection: TestSelection, opts: { signal?: AbortSignal; timeoutMs: number }): Promise<StructuredTestResult>;
   cleanup(): Promise<void>;
 }
-export type DockerInvoker = (cmd: string, args: string[], opts: ExecOptions) => Promise<ExecResult>;
 export interface DockerProjectRunnerOptions { image?: string; invoke?: DockerInvoker }
 interface ReportTask { name?: string; type?: string; mode?: string; result?: { state?: string; errors?: Array<{ name?: string; message?: string; stack?: string }>; hooks?: Record<string, string> }; tasks?: ReportTask[] }
 export interface VitestEvidence { version: 1; files: Array<{ path: string; task: ReportTask }>; errors: unknown[] }
@@ -47,30 +61,6 @@ const MAX_METADATA_BYTES = 2_000_000;
 const EVIDENCE_MARKER = "__VOUCH_EVIDENCE_V1__";
 const MAX_SETUP_BYTES = 750_000_000;
 const MAX_SETUP_ENTRIES = 100_000;
-
-function exceedsDirectoryLimit(root: string, maxBytes: number, maxEntries: number): boolean {
-  const queue = [root];
-  let bytes = 0;
-  let entries = 0;
-  while (queue.length) {
-    const directory = queue.pop()!;
-    let children;
-    try { children = readdirSync(directory, { withFileTypes: true }); }
-    catch { continue; }
-    for (const child of children) {
-      entries++;
-      if (entries > maxEntries) return true;
-      const path = join(directory, child.name);
-      if (child.isDirectory() && !child.isSymbolicLink()) queue.push(path);
-      else {
-        try { bytes += lstatSync(path).size; }
-        catch { continue; }
-        if (bytes > maxBytes) return true;
-      }
-    }
-  }
-  return false;
-}
 
 function validateNpmLock(bytes: Buffer): void {
   const lock = JSON.parse(bytes.toString("utf8")) as {
@@ -232,29 +222,20 @@ export function classifyVitestEvidence(evidence: unknown, execution: ExecResult,
 }
 
 export class DockerProjectRunner implements ProjectTestRunner {
-  private readonly invoke: DockerInvoker;
+  private readonly session: DockerSession;
   private readonly image: string;
   private runtimeData?: ProjectRuntime;
   private root?: string;
   private workspace?: LocalWorkspace;
-  private active = new Set<string>();
-  constructor(opts: DockerProjectRunnerOptions = {}) { this.invoke = opts.invoke ?? runCommand; this.image = opts.image ?? DEFAULT_NODE_IMAGE; }
+  constructor(opts: DockerProjectRunnerOptions = {}) { this.session = new DockerSession(opts.invoke); this.image = opts.image ?? DEFAULT_NODE_IMAGE; }
   get runtime(): ProjectRuntime | undefined { return this.runtimeData ? { ...this.runtimeData } : undefined; }
 
-  private async execute(
+  private execute(
     args: string[],
     opts: { signal?: AbortSignal; timeoutMs: number },
     maxOutputBytes = 100_000,
   ): Promise<ExecResult> {
-    const name = `vouch-${randomUUID()}`;
-    this.active.add(name);
-    try {
-      return await this.invoke("docker", ["run", "--name", name, "--init", "--log-driver=local", "--log-opt", "max-size=1m", "--log-opt", "max-file=1", "--log-opt", "compress=false", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128", "--memory=1g", "--cpus=2", "--ulimit=nofile=1024:1024", "--user", `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`, "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m", "--env", "HOME=/tmp/vouch-home", "--env", "CI=1", ...args], { cwd: this.root ?? tmpdir(), env: localProcessEnv(), timeoutMs: opts.timeoutMs, signal: opts.signal, maxOutputBytes });
-    } finally {
-      const removed = await this.invoke("docker", ["rm", "--force", name], { cwd: this.root ?? tmpdir(), env: localProcessEnv(), timeoutMs: 5000, maxOutputBytes: 1000 });
-      if (removed.exitCode === 0 && !removed.timedOut && !removed.cancelled) this.active.delete(name);
-      else throw new Error(`could not remove sandbox container ${name}`);
-    }
+    return this.session.run(args, opts, maxOutputBytes);
   }
 
   async prepare(workspace: LocalWorkspace, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<void> {
@@ -365,17 +346,7 @@ export class DockerProjectRunner implements ProjectTestRunner {
   }
 
   async cleanup(): Promise<void> {
-    const failed: string[] = [];
-    for (const name of [...this.active]) {
-      try {
-        const removed = await this.invoke("docker", ["rm", "--force", name], { cwd: tmpdir(), env: localProcessEnv(), timeoutMs: 5000, maxOutputBytes: 1000 });
-        if (removed.exitCode === 0 && !removed.timedOut && !removed.cancelled) this.active.delete(name);
-        else failed.push(name);
-      } catch {
-        failed.push(name);
-      }
-    }
-    if (failed.length) throw new Error(`could not remove sandbox containers: ${failed.join(", ")}`);
+    await this.session.cleanup();
     if (this.root) rmSync(this.root, { recursive: true, force: true });
     this.root = undefined;
     this.workspace = undefined;

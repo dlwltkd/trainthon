@@ -19,3 +19,6 @@ export { prepareLocalWorkspace, readBoundedRegularFile, writeLocalSource, isLoca
 export type { LocalWorkspace, PrepareLocalWorkspaceOptions } from "./local-workspace.js";
 export { DockerProjectRunner, classifyVitestEvidence, DEFAULT_NODE_IMAGE } from "./docker-project.js";
 export type { ProjectTestRunner, ProjectRuntime, DockerProjectRunnerOptions, DockerInvoker, StructuredTestResult, TestSelection, VitestEvidence } from "./docker-project.js";
+export { PythonProjectRunner, createProjectTestRunner, DEFAULT_PYTHON_IMAGE } from "./python-project.js";
+export { classifyPytestEvidence } from "./pytest-evidence.js";
+export type { PytestEvidence } from "./pytest-evidence.js";

@@ -126,7 +126,7 @@ export function buildLocalRepairTools(options: LocalToolOptions): LocalRepairToo
   );
   for (const [name, description, selection] of [
     ["run_regression", "Run only the exact supplied security regression test in the isolated project container. No args.", "regression"],
-    ["run_functional_tests", "Run the project's functional Vitest suite while excluding the supplied regression. No args.", "functional"],
+    ["run_functional_tests", "Run the project's functional test suite while excluding the supplied regression. No args.", "functional"],
   ] as const) {
     tools.push(defineTool(name, description, z.object({}), () => queue.run(async () => {
       options.signal.throwIfAborted();

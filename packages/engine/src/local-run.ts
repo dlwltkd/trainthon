@@ -18,7 +18,7 @@ import {
   applyLocalPatch,
   captureLocalChanges,
   createVerificationWorkspace,
-  DockerProjectRunner,
+  createProjectTestRunner,
   prepareLocalWorkspace,
   readBoundedRegularFile,
   readFileTool,
@@ -78,7 +78,7 @@ export interface ExecuteLocalRunOptions {
   patchPath?: string;
   signal?: AbortSignal;
   onEvent?: (event: HarnessEvent) => void;
-  /** Test seam. Production runs use DockerProjectRunner. */
+  /** Test seam. Production runs select an isolated runner from the regression type. */
   testRunner?: ProjectTestRunner;
   /** Test seam. Live production runs resolve the exact configured model. */
   repairRunner?: AgentRunner;
@@ -499,7 +499,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
       inputHash,
     });
 
-    runner = options.testRunner ?? new DockerProjectRunner();
+    runner = options.testRunner ?? createProjectTestRunner(workspace);
     await runner.prepare(workspace, { signal: budget.signal, timeoutMs: remaining(SETUP_TIMEOUT_MS) });
     runtime = runner.runtime ?? null;
     writeJson(artifacts.repository, { ...repository, runtime });

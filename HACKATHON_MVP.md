@@ -22,8 +22,9 @@ Use the existing TypeScript engine, a local Hono API with SSE, and a React/Vite
 interface. Keep JSONL as the record of each run. Prepared local targets remain the
 benchmark environment. The audience demo adds GitHub sign-in, selected-repository
 access, and GitHub-hosted Actions execution against participants' actual projects.
-Start with Node-based JS/TS repositories using Vitest and an installable lockfile;
-show this compatibility requirement before connection. Other test adapters and
+Support JS/TS repositories using Vitest and a lockfile, and Python 3.11
+repositories with pinned pytest requirements; show these requirements before
+connection. Other test adapters and
 production-server deployment come later.
 
 The demo has three beats:
@@ -170,10 +171,10 @@ account plan and repository visibility.
 
 The first existing-repository harness slice is now implemented in the CLI. It
 accepts a local Git root, pinned ref, supplied report, and designated regression;
-uses the project's lockfile and Vitest installation in Docker; permits source-only
+uses the project's locked Vitest installation or pinned pytest requirements in Docker; permits source-only
 changes; and persists the patch, structured before/after test evidence, run record,
 and correlated event log before cleanup. Records bind the run to the commit,
-regression, lockfile, pinned image, runner versions, and exact test inventories.
+regression, dependency input, pinned image, runner versions, and exact test inventories.
 Dependency preparation rejects install scripts and local/custom package sources;
 dependency extraction has a size/entry monitor, and tests run offline with bounded
 structured output. It does not load a benchmark task or hidden grader. Local
@@ -186,8 +187,11 @@ configuration and environment files are disabled; immutable harness options driv
 collection and execution, including an empty inline PostCSS configuration.
 This slice supports Vitest 4–5 and Vite 6.1 or newer. Config-defined
 plugins, setup files, aliases, and custom test patterns are therefore outside the
-current slice. The exact supplied test and conventional test files are immutable.
-Editable application modules still share the Vitest worker with assertions: they
+current slice. Python 3.11 / pytest 8–9 support installs PyPI wheels from exact
+requirements pins, records resolved versions and wheel hashes, disables pytest
+configuration and plugin autoload, and preserves immutable `conftest.py` fixtures.
+The exact supplied test and conventional test files are immutable.
+Editable application modules still share the test process with assertions: they
 can overfit visible checks or alter assertion behavior. Test passes therefore
 require code review and do not prove a security fix or benchmark improvement.
 Only the benchmark path has a separate hidden grader. Hidden tests alone do not
