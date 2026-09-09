@@ -203,11 +203,12 @@ export interface ModelProbeResult {
   inputTokens: number;
   outputTokens: number;
   usageKnown?: boolean;
-  steps?: 1;
+  steps?: number;
   toolCalls?: 1;
+  responseValidated?: true;
 }
 
-/** Verify credentials, model selection, usage reporting, and one required tool call. */
+/** Verify a tool call and a subsequent response that can only come from its result. */
 export async function probeModel(
   spec: ModelSpec,
   options: { env?: NodeJS.ProcessEnv; signal?: AbortSignal; runner?: AgentRunner } = {},
@@ -215,15 +216,16 @@ export async function probeModel(
   const canonical = canonicalizeModelSpec(spec);
   const runner = options.runner ?? requireRunnerForSpec(canonical, options.env);
   const nonce = randomBytes(16).toString("hex");
-  const limits = { maxTokens: 4_096, maxSteps: 1, maxWallMs: 45_000 } as const;
+  const responseToken = randomBytes(16).toString("hex");
+  const limits = { maxTokens: 32_768, maxSteps: 2, maxWallMs: 60_000 } as const;
   const budget = new RunBudget(limits, options.signal);
   let attempts = 0;
   let completed = 0;
   const startedAt = performance.now();
   try {
     const result = await runner.run({
-      system: "You are checking an API connection. Call the supplied connection_probe tool exactly once.",
-      prompt: `Call connection_probe once with this exact nonce: ${nonce}`,
+      system: "You are checking an API connection. Call connection_probe exactly once, then reply with only the responseToken from its result. Do not guess it or call the tool again.",
+      prompt: `Call connection_probe once with this exact nonce: ${nonce}. After receiving the tool result, return its responseToken verbatim without formatting.`,
       tools: [{
         name: "connection_probe",
         description: "Return the supplied connection nonce.",
@@ -232,17 +234,18 @@ export async function probeModel(
           attempts++;
           if (attempts !== 1) throw new Error("Provider called connection_probe more than once");
           completed++;
-          return { ok: true };
+          return { ok: true, responseToken };
         },
       }],
       budgets: limits,
       budget,
       model: canonical.model,
-      toolChoice: "required",
+      toolChoice: "auto",
+      requestPolicy: { maxRetries: 0, timeoutMs: 30_000, transport: "stream" },
       onEvent: () => undefined,
     });
-    if (attempts !== 1 || completed !== 1 || result.steps !== 1) {
-      throw new Error("Provider did not complete exactly one required connection_probe tool call");
+    if (attempts !== 1 || completed !== 1 || result.steps !== 2 || result.finalText.trim() !== responseToken) {
+      throw new Error("Provider did not complete a tool call and validated follow-up response");
     }
     return {
       provider: canonical.provider,
@@ -253,8 +256,9 @@ export async function probeModel(
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       usageKnown: budget.usageKnown,
-      steps: 1,
+      steps: result.steps,
       toolCalls: 1,
+      responseValidated: true,
     };
   } finally {
     budget.dispose();

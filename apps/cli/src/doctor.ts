@@ -84,7 +84,7 @@ export async function runDoctor(
           ? `usageBound<=${result.inputTokens}+${result.outputTokens} accounting=conservative`
           : `usage=${result.inputTokens}+${result.outputTokens}`;
         lines.push(
-          `    toolCall=passed latencyMs=${result.latencyMs} ${usage}`,
+          `    toolCall=passed${result.responseValidated ? " roundTrip=passed" : ""} latencyMs=${result.latencyMs} ${usage}`,
         );
       } catch (error) {
         ok = false;

@@ -53,26 +53,30 @@ function routewayProbeResponse(
 ): Response {
   const nonce = JSON.stringify(body).match(/[a-f0-9]{32}/)?.[0];
   if (!nonce) throw new Error("probe nonce missing from request");
-  return new Response(JSON.stringify({
+  const messages = body.messages as Array<{ role: string; content?: string }>;
+  const toolResult = messages.find(message => message.role === "tool");
+  const chunk = {
     id: "chatcmpl-probe",
-    object: "chat.completion",
+    object: "chat.completion.chunk",
     created: 1,
     model: body.model,
     choices: [{
       index: 0,
-      message: {
+      delta: toolResult ? { content: JSON.parse(toolResult.content!).responseToken } : {
         role: "assistant",
         content: null,
         tool_calls: [{
+          index: 0,
           id: "call-probe",
           type: "function",
           function: { name: "connection_probe", arguments: JSON.stringify({ nonce }) },
         }],
       },
-      finish_reason: "tool_calls",
+      finish_reason: toolResult ? "stop" : "tool_calls",
     }],
     usage,
-  }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
 afterEach(() => {
@@ -529,7 +533,7 @@ describe("explicit provider configuration", () => {
 });
 
 describe("live provider probe", () => {
-  it("performs one Routeway-compatible required tool call without exposing the key", async () => {
+  it("validates a complete Routeway tool round trip without exposing the key", async () => {
     const requests: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = [];
     const fetchMock: NonNullable<Parameters<typeof createCompatibleRunner>[0]["fetch"]> = async (input, init) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -548,12 +552,14 @@ describe("live provider probe", () => {
       model: ROUTEWAY_GLM_FLASH_UNCENSORED,
     }, { runner });
 
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(2);
     expect(requests[0]?.url).toBe(`${GATEWAYS.routeway}/chat/completions`);
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer routeway-test-secret");
     expect(requests[0]?.body).toMatchObject({
       model: ROUTEWAY_GLM_FLASH_UNCENSORED,
-      tool_choice: "required",
+      tool_choice: "auto",
+      stream: true,
+      stream_options: { include_usage: true },
       max_completion_tokens: expect.any(Number),
       tools: [{ type: "function", function: { name: "connection_probe" } }],
     });
@@ -564,10 +570,11 @@ describe("live provider probe", () => {
       model: ROUTEWAY_GLM_FLASH_UNCENSORED,
       apiKeyEnv: "ROUTEWAY_API_KEY",
       baseURL: GATEWAYS.routeway,
-      inputTokens: 17,
-      outputTokens: 5,
-      steps: 1,
+      inputTokens: 34,
+      outputTokens: 10,
+      steps: 2,
       toolCalls: 1,
+      responseValidated: true,
       latencyMs: expect.any(Number),
     });
     expect(JSON.stringify(result)).not.toContain("routeway-test-secret");
@@ -586,12 +593,13 @@ describe("live provider probe", () => {
     const routewayRunner = createRunnerForSpec(routeway, { ROUTEWAY_API_KEY: "fixture" })!;
     const result = await probeModel(routeway, { runner: routewayRunner });
     expect(result.usageKnown).toBe(false);
-    expect(result.inputTokens + result.outputTokens).toBe(4_096);
+    expect(result.inputTokens + result.outputTokens).toBeGreaterThan(16_384);
+    expect(result.inputTokens + result.outputTokens).toBeLessThan(32_768);
 
     const other = { provider: "compatible" as const, model: "other-routeway-model" };
     const strictRunner = createRunnerForSpec(other, { ROUTEWAY_API_KEY: "fixture" })!;
     await expect(probeModel(other, { runner: strictRunner })).rejects.toThrow("complete token usage");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("fails when a runner does not perform the required probe call", async () => {
@@ -599,6 +607,16 @@ describe("live provider probe", () => {
       run: async () => ({ finalText: "skipped", inputTokens: 1, outputTokens: 1, steps: 1 }),
     };
     await expect(probeModel({ provider: "openai", model: "gpt-example" }, { runner }))
-      .rejects.toThrow("exactly one required");
+      .rejects.toThrow("validated follow-up response");
+  });
+
+  it("rejects a successful first tool call when the final response never used its result", async () => {
+    const runner: AgentRunner = { run: async input => {
+      const nonce = input.prompt.match(/[a-f0-9]{32}/)![0];
+      const spec = input.tools[0]!;
+      await spec.execute(spec.schema.parse({ nonce }));
+      return { finalText: nonce, inputTokens: 1, outputTokens: 1, steps: 2 };
+    } };
+    await expect(probeModel({ provider: "openai", model: "gpt-example" }, { runner })).rejects.toThrow("validated follow-up response");
   });
 });

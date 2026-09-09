@@ -117,7 +117,7 @@ command probes both roles:
 
 ```bash
 install -m 600 .env.example .env
-# Edit .env, validate configuration, then make one tool-call probe per role.
+# Edit .env, validate configuration, then check a complete tool-call round trip per role.
 pnpm cli doctor
 pnpm cli doctor --live
 ```
