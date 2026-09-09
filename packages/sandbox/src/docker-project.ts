@@ -37,13 +37,53 @@ export interface ProjectTestRunner {
 }
 export type DockerInvoker = (cmd: string, args: string[], opts: ExecOptions) => Promise<ExecResult>;
 export interface DockerProjectRunnerOptions { image?: string; invoke?: DockerInvoker }
-interface ReportTask { name?: string; type?: string; mode?: string; result?: { state?: string; errors?: Array<{ name?: string; message?: string }>; hooks?: Record<string, string> }; tasks?: ReportTask[] }
+interface ReportTask { name?: string; type?: string; mode?: string; result?: { state?: string; errors?: Array<{ name?: string; message?: string; stack?: string }>; hooks?: Record<string, string> }; tasks?: ReportTask[] }
 export interface VitestEvidence { version: 1; files: Array<{ path: string; task: ReportTask }>; errors: unknown[] }
 
 export const DEFAULT_NODE_IMAGE = "node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5";
 const MAX_METADATA_BYTES = 2_000_000;
+const EVIDENCE_MARKER = "__VOUCH_EVIDENCE_V1__";
 
-const REPORTER = `const clean = task => ({ name: task.name, type: task.type, mode: task.mode, result: task.result && { state: task.result.state, errors: task.result.errors?.map(e => ({name:e.name,message:e.message})), hooks:task.result.hooks }, tasks: task.tasks?.map(clean) });
+function validateNpmLock(bytes: Buffer): void {
+  const lock = JSON.parse(bytes.toString("utf8")) as {
+    lockfileVersion?: number;
+    packages?: Record<string, { version?: string; resolved?: string; integrity?: string; link?: boolean }>;
+  };
+  if (lock.lockfileVersion !== 3 || !lock.packages) throw new Error("npm MVP requires a package-lock.json at lockfileVersion 3");
+  for (const [path, entry] of Object.entries(lock.packages)) {
+    if (!path) continue;
+    if (entry.link) throw new Error("linked npm dependencies are unsupported in the local MVP");
+    if (entry.resolved) {
+      let url: URL;
+      try { url = new URL(entry.resolved); }
+      catch { throw new Error(`npm lockfile contains a non-URL dependency source: ${path}`); }
+      if (url.protocol !== "https:" || url.hostname !== "registry.npmjs.org") {
+        throw new Error(`npm lockfile dependency is outside registry.npmjs.org: ${path}`);
+      }
+    }
+  }
+  for (const name of ["vitest", "vite"] as const) {
+    const entry = lock.packages[`node_modules/${name}`];
+    if (!entry?.resolved?.startsWith(`https://registry.npmjs.org/${name}/-/`) || !/^sha512-[A-Za-z0-9+/=]+$/.test(entry.integrity ?? "")) {
+      throw new Error(`npm lockfile must pin ${name} to an integrity-checked registry.npmjs.org package`);
+    }
+  }
+}
+
+function validatePnpmLock(bytes: Buffer): void {
+  const lock = bytes.toString("utf8");
+  if (!/^lockfileVersion:\s*['"]?9\.0['"]?\s*$/m.test(lock)) throw new Error("pnpm MVP requires lockfileVersion 9.0");
+  if (/(?:\b(?:tarball|directory):|\b(?:link|file):)/i.test(lock)) {
+    throw new Error("linked, file, directory, and custom tarball dependencies are unsupported in the local MVP");
+  }
+  for (const name of ["vitest", "vite"] as const) {
+    const escaped = name.replace("/", "\\/");
+    const entry = new RegExp(`^  ${escaped}@[3456789]\\.[^:\\n]+:\\n    resolution: \\{integrity: sha512-[A-Za-z0-9+/=]+\\}`, "m");
+    if (!entry.test(lock)) throw new Error(`pnpm lockfile must pin ${name} with sha512 integrity`);
+  }
+}
+
+const REPORTER = `const clean = task => ({ name: task.name, type: task.type, mode: task.mode, result: task.result && { state: task.result.state, errors: task.result.errors?.map(e => ({name:e.name,message:e.message,stack:e.stack})), hooks:task.result.hooks }, tasks: task.tasks?.map(clean) });
 export default class VouchReporter {
   onInit(ctx) { this.ctx = ctx; }
   save(files, errors) { globalThis.__vouchEvidence = {version:1,files:(files || []).map(file => ({path:file.filepath,task:clean(file)})),errors:(errors || []).map(e=>({name:e.name,message:e.message}))}; }
@@ -52,17 +92,16 @@ export default class VouchReporter {
 }
 `;
 
-const LAUNCHER = `import { writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+const LAUNCHER = `import { createRequire } from 'node:module';
 const require = createRequire('/repo/package.json');
 const { startVitest } = await import(require.resolve('vitest/node'));
 const { configDefaults } = await import(require.resolve('vitest/config'));
 const [selection, regression] = process.argv.slice(2);
 const options = { root:'/repo',run:true,watch:false,cache:false,fsModuleCache:false,configLoader:'runner',pool:'forks',isolate:true,fileParallelism:false,maxWorkers:1,reporters:['/vouch/reporter.mjs'] };
-if(selection === 'functional') options.exclude = [...configDefaults.exclude, regression];
+if(selection === 'regression') { options.include = [regression]; options.exclude = [...configDefaults.exclude]; }
 const ctx = await startVitest('test', selection === 'regression' ? [regression] : [], options, {cacheDir:'/tmp/vite-cache'});
 await ctx?.close();
-if (globalThis.__vouchEvidence) writeFileSync('/evidence/result.json', JSON.stringify(globalThis.__vouchEvidence));
+if (globalThis.__vouchEvidence) process.stdout.write('\\n${EVIDENCE_MARKER}' + Buffer.from(JSON.stringify(globalThis.__vouchEvidence)).toString('base64') + '\\n');
 `;
 
 export function classifyVitestEvidence(evidence: unknown, execution: ExecResult, selection: TestSelection, regressionPath: string): StructuredTestResult {
@@ -97,7 +136,10 @@ export function classifyVitestEvidence(evidence: unknown, execution: ExecResult,
     else if (task.result?.state === "fail") {
       base.testsFailed++;
       failureDetails.push(`${task.name ?? "test"}: ${errors.map(error => error.message ?? error.name ?? "assertion failed").join("; ")}`);
-      if (!errors.length || errors.some(error => !["AssertionError", "AssertionError [ERR_ASSERTION]"].includes(error.name ?? ""))) invalidReason = "failure was not a test assertion";
+      if (!errors.length || errors.some(error =>
+        !["AssertionError", "AssertionError [ERR_ASSERTION]"].includes(error.name ?? "") ||
+        !/(?:node:assert|node_modules\/(?:@vitest\/expect|chai|vitest))/i.test(error.stack ?? "")
+      )) invalidReason = "failure was not a test-runner assertion";
     } else invalidReason = "test did not finish";
   };
   for (const file of report.files) {
@@ -143,14 +185,19 @@ export class DockerProjectRunner implements ProjectTestRunner {
   constructor(opts: DockerProjectRunnerOptions = {}) { this.invoke = opts.invoke ?? runCommand; this.image = opts.image ?? DEFAULT_NODE_IMAGE; }
   get runtime(): ProjectRuntime | undefined { return this.runtimeData ? { ...this.runtimeData } : undefined; }
 
-  private async execute(args: string[], opts: { signal?: AbortSignal; timeoutMs: number }): Promise<ExecResult> {
+  private async execute(
+    args: string[],
+    opts: { signal?: AbortSignal; timeoutMs: number },
+    maxOutputBytes = 100_000,
+  ): Promise<ExecResult> {
     const name = `vouch-${randomUUID()}`;
     this.active.add(name);
     try {
-      return await this.invoke("docker", ["run", "--rm", "--name", name, "--init", "--log-driver=none", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128", "--memory=1g", "--cpus=2", "--ulimit=nofile=1024:1024", "--user", `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`, "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m", "--env", "HOME=/tmp/vouch-home", "--env", "CI=1", ...args], { cwd: this.root ?? tmpdir(), env: localProcessEnv(), timeoutMs: opts.timeoutMs, signal: opts.signal, maxOutputBytes: 100_000 });
+      return await this.invoke("docker", ["run", "--name", name, "--init", "--log-driver=local", "--log-opt", "max-size=1m", "--log-opt", "max-file=1", "--log-opt", "compress=false", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128", "--memory=1g", "--cpus=2", "--ulimit=nofile=1024:1024", "--user", `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`, "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m", "--env", "HOME=/tmp/vouch-home", "--env", "CI=1", ...args], { cwd: this.root ?? tmpdir(), env: localProcessEnv(), timeoutMs: opts.timeoutMs, signal: opts.signal, maxOutputBytes });
     } finally {
-      await this.invoke("docker", ["rm", "--force", name], { cwd: this.root ?? tmpdir(), env: localProcessEnv(), timeoutMs: 5000, maxOutputBytes: 1000 });
-      this.active.delete(name);
+      const removed = await this.invoke("docker", ["rm", "--force", name], { cwd: this.root ?? tmpdir(), env: localProcessEnv(), timeoutMs: 5000, maxOutputBytes: 1000 });
+      if (removed.exitCode === 0 && !removed.timedOut && !removed.cancelled) this.active.delete(name);
+      else throw new Error(`could not remove sandbox container ${name}`);
     }
   }
 
@@ -164,6 +211,10 @@ export class DockerProjectRunner implements ProjectTestRunner {
     const npm = existsSync(join(workspace.baselineDir, "package-lock.json"));
     const pnpm = existsSync(join(workspace.baselineDir, "pnpm-lock.yaml"));
     if (npm === pnpm) throw new Error("exactly one npm or pnpm lockfile is required");
+    const lockfile = pnpm ? "pnpm-lock.yaml" : "package-lock.json";
+    const lockfileBytes = readBoundedRegularFile(join(workspace.baselineDir, lockfile), MAX_METADATA_BYTES, lockfile);
+    if (pnpm) validatePnpmLock(lockfileBytes);
+    else validateNpmLock(lockfileBytes);
     if (manifest.packageManager && !new RegExp(`^${pnpm ? "pnpm" : "npm"}@\\d+\\.\\d+\\.\\d+(?:[-+][A-Za-z0-9.-]+)?$`).test(manifest.packageManager)) throw new Error("packageManager must match the lockfile and specify an exact version");
     this.root = mkdtempSync(join(tmpdir(), "vouch-docker-"));
     this.workspace = workspace;
@@ -195,12 +246,11 @@ export class DockerProjectRunner implements ProjectTestRunner {
     const vite = JSON.parse(readBoundedRegularFile(join(setup, "node_modules", "vite", "package.json"), MAX_METADATA_BYTES, "installed Vite package.json").toString("utf8")) as { version?: string };
     const [viteMajor = 0, viteMinor = 0] = (vite.version ?? "").split(".").map(Number);
     if (viteMajor < 6 || (viteMajor === 6 && viteMinor < 1)) throw new Error("MVP structured verification requires Vite 6.1 or newer");
-    const lockfile = pnpm ? "pnpm-lock.yaml" : "package-lock.json";
     this.runtimeData = {
       adapter: "vitest",
       image: this.image,
       lockfile,
-      lockfileHash: createHash("sha256").update(readBoundedRegularFile(join(workspace.baselineDir, lockfile), MAX_METADATA_BYTES, lockfile)).digest("hex"),
+      lockfileHash: createHash("sha256").update(lockfileBytes).digest("hex"),
       packageManager: manifest.packageManager ?? (pnpm ? "pnpm@10.33.3" : `npm@${npmVersion}`),
       vitestVersion: installed.version!,
       viteVersion: vite.version!,
@@ -210,20 +260,48 @@ export class DockerProjectRunner implements ProjectTestRunner {
   async runTests(dir: string, selection: TestSelection, opts: { signal?: AbortSignal; timeoutMs: number }): Promise<StructuredTestResult> {
     if (!this.root || !this.workspace) throw new Error("prepare the project runner before running tests");
     if (![this.workspace.dir, this.workspace.baselineDir, this.workspace.verificationDir].includes(resolve(dir))) throw new Error("test directory is outside the prepared workspace");
-    const evidenceDir = mkdtempSync(join(this.root, "evidence-"));
-    mkdirSync(join(dir, "node_modules"), { recursive: true });
-    const result = await this.execute(["--network=none", "--mount", `type=bind,src=${dir},dst=/repo,readonly`, "--mount", `type=bind,src=${join(this.root, "setup", "node_modules")},dst=/repo/node_modules,readonly`, "--mount", `type=bind,src=${join(this.root, "tools")},dst=/vouch,readonly`, "--mount", `type=bind,src=${evidenceDir},dst=/evidence`, "--workdir=/repo", this.image, "node", "/vouch/run.mjs", selection, this.workspace.regressionPath], opts);
-    let evidence: unknown;
+    let runDir = dir;
+    let functionalSnapshot: string | undefined;
+    if (selection === "functional") {
+      functionalSnapshot = mkdtempSync(join(this.root, "functional-"));
+      cpSync(dir, functionalSnapshot, { recursive: true });
+      rmSync(join(functionalSnapshot, this.workspace.regressionPath), { force: true });
+      runDir = functionalSnapshot;
+    }
+    mkdirSync(join(runDir, "node_modules"), { recursive: true });
+    let result: ExecResult;
     try {
-      const evidencePath = join(evidenceDir, "result.json");
-      evidence = JSON.parse(readBoundedRegularFile(evidencePath, MAX_METADATA_BYTES, "test evidence").toString());
+      result = await this.execute(["--network=none", "--mount", `type=bind,src=${runDir},dst=/repo,readonly`, "--mount", `type=bind,src=${join(this.root, "setup", "node_modules")},dst=/repo/node_modules,readonly`, "--mount", `type=bind,src=${join(this.root, "tools")},dst=/vouch,readonly`, "--workdir=/repo", this.image, "node", "/vouch/run.mjs", selection, this.workspace.regressionPath], opts, 3_000_000);
+    } finally {
+      if (functionalSnapshot) rmSync(functionalSnapshot, { recursive: true, force: true });
+    }
+    let evidence: unknown;
+    let execution = result;
+    try {
+      const markerIndex = result.stdout.lastIndexOf(EVIDENCE_MARKER);
+      if (markerIndex < 0) throw new Error("missing evidence marker");
+      const encoded = result.stdout.slice(markerIndex + EVIDENCE_MARKER.length).trim();
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) || encoded.length > Math.ceil(MAX_METADATA_BYTES / 3) * 4 + 4) throw new Error("invalid evidence encoding");
+      const decoded = Buffer.from(encoded, "base64");
+      if (decoded.length > MAX_METADATA_BYTES) throw new Error("oversized evidence");
+      evidence = JSON.parse(decoded.toString("utf8"));
+      execution = { ...result, stdout: result.stdout.slice(0, markerIndex).trimEnd() };
     } catch { /* Missing, special, oversized, or malformed evidence fails verification. */ }
-    return classifyVitestEvidence(evidence, result, selection, this.workspace.regressionPath);
+    return classifyVitestEvidence(evidence, execution, selection, this.workspace.regressionPath);
   }
 
   async cleanup(): Promise<void> {
-    for (const name of this.active) await this.invoke("docker", ["rm", "--force", name], { cwd: tmpdir(), env: localProcessEnv(), timeoutMs: 5000, maxOutputBytes: 1000 });
-    this.active.clear();
+    const failed: string[] = [];
+    for (const name of [...this.active]) {
+      try {
+        const removed = await this.invoke("docker", ["rm", "--force", name], { cwd: tmpdir(), env: localProcessEnv(), timeoutMs: 5000, maxOutputBytes: 1000 });
+        if (removed.exitCode === 0 && !removed.timedOut && !removed.cancelled) this.active.delete(name);
+        else failed.push(name);
+      } catch {
+        failed.push(name);
+      }
+    }
+    if (failed.length) throw new Error(`could not remove sandbox containers: ${failed.join(", ")}`);
     if (this.root) rmSync(this.root, { recursive: true, force: true });
     this.root = undefined;
     this.workspace = undefined;

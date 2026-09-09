@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { DEFAULT_BUDGETS } from "@vouch/protocol";
 import { executeLocalRun, executeRun, loadTask } from "@vouch/engine";
+import { readBoundedRegularFile } from "@vouch/sandbox";
 import { parseArgs } from "./args.js";
 import { parseRunOptions } from "./run-options.js";
 
@@ -22,7 +22,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
   process.once("SIGTERM", interrupt);
   try {
     if (options.kind === "repository") {
-      const report = readFileSync(resolve(options.reportPath), "utf8");
+      const report = readBoundedRegularFile(resolve(options.reportPath), 200_000, "report").toString("utf8");
       if (!report.trim()) throw new Error("the supplied report is empty");
       const record = await executeLocalRun({
         repoPath: resolve(options.repoPath),
@@ -55,8 +55,8 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
     const record = await executeRun({
       task,
       config: {
-        model: options.model.model,
-        provider: options.model.provider,
+        model: "scripted",
+        provider: "scripted",
         mode: options.mode,
         seed: options.seed,
         budgets: DEFAULT_BUDGETS,

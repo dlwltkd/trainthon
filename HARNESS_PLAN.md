@@ -153,7 +153,7 @@ injection 등).
 | M0 ✅ | 0–1h | 모노레포+protocol+이벤트 로거+CLI. `cli run --task hello --condition B`가 올바른 JSONL run 기록 생성 |
 | M1 ✅ | 1–3h | sandbox worktree + 도구 + 모델 루프(B). 기본 에이전트가 취약 fixture 수정, grader가 FIXED_VERIFIED |
 | M2 ✅ | 3–5h | harness(C) + Red/Blue + 게이트. C가 V 하나 수정 AND 대조 하나 정답(diff=0). = P0 완료 — `proto-pollution` C→FIXED_VERIFIED, `proto-pollution-fixed` C→NOT_REPRODUCIBLE(diff 0), 스크립트 러너로 검증. 실모델 검증은 키 투입 후 |
-| Local harness ✅ | — | 로컬 Git 커밋 + 제공 리포트/회귀 테스트 입력, 소스 전용 수정, 공유 예산/취소, Docker 격리 설치·구조화 Vitest 전후 검증, 상관관계 이벤트와 영구 artifact. 실제 Docker scripted E2E와 테스트 suite로 검증. Routeway 실키 검증은 남음 |
+| Local harness ✅ | — | 로컬 Git 커밋 + 제공 리포트/회귀 테스트 입력, 소스 전용 수정, 공유 예산/취소, 고정 Docker 이미지·잠금파일 기반 설치·구조화 Vitest 전후 검증, 테스트 목록 동일성, 상관관계 이벤트와 영구 artifact. 실제 Docker scripted E2E와 테스트 suite로 검증. 저장소 소유자가 선택한 커밋·lockfile·테스트 설정을 신뢰하는 범위이며 Routeway 실키 검증은 남음 |
 | M3 | 5–7h | SSE + 실제 저장소/파일/diff + 읽기 쉬운 에이전트 활동·도구 호출·스킬/가이드 표시 + 검증 결과 + 모바일/발표 뷰 + replay |
 | M4 | 7–9h | bench 러너 + dev 4개 + 지표. `cli bench --set dev` 지표 표 |
 | M5 | 9–13h | eval 8(실제 CVE 2 fork 포함) + prereg 커밋 + 48회 + 결과 표·차트 + fork draft PR URL |

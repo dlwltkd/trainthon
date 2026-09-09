@@ -41,8 +41,13 @@ export function parseRunOptions(flags: Flags, env: NodeJS.ProcessEnv = process.e
   if (mode !== "live" && mode !== "scripted") throw new Error("--mode must be live or scripted");
   const seed = Number(value(flags, "seed") ?? "1");
   if (!Number.isSafeInteger(seed) || seed < 0) throw new Error("--seed must be a nonnegative integer");
-  const modelId = value(flags, "model") ?? "claude-sonnet-5";
-  const model: ModelSpec = {
+  if (mode === "scripted") {
+    for (const key of ["model", "provider", "base-url", "api-key-env"]) {
+      if (flags[key] !== undefined) throw new Error(`--${key} is only supported in live mode`);
+    }
+  }
+  const modelId = mode === "scripted" ? "scripted" : value(flags, "model") ?? "claude-sonnet-5";
+  const model: ModelSpec = mode === "scripted" ? { model: modelId, provider: "compatible" } : {
     model: modelId,
     provider: provider(value(flags, "provider"), modelId),
     baseURL: value(flags, "base-url"),

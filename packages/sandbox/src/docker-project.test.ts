@@ -11,8 +11,17 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 const success: ExecResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
 const failing: ExecResult = { ...success, exitCode: 1 };
 function evidence(state: string, errorName = "AssertionError"): VitestEvidence {
-  return { version: 1, files: [{ path: "/repo/regression.test.ts", task: { type: "suite", result: { state }, tasks: [{ type: "test", mode: "run", result: { state, errors: state === "fail" ? [{ name: errorName, message: "expected 1 to be 2" }] : [] } }] } }], errors: [] };
+  return { version: 1, files: [{ path: "/repo/regression.test.ts", task: { type: "suite", result: { state }, tasks: [{ type: "test", mode: "run", result: { state, errors: state === "fail" ? [{ name: errorName, message: "expected 1 to be 2", stack: "AssertionError: expected 1 to be 2\n at /repo/node_modules/@vitest/expect/index.js:1:1" }] : [] } }] } }], errors: [] };
 }
+const npmLock = JSON.stringify({
+  lockfileVersion: 3,
+  packages: {
+    "": {},
+    "node_modules/vitest": { version: "5.0.0", resolved: "https://registry.npmjs.org/vitest/-/vitest-5.0.0.tgz", integrity: "sha512-AAAA" },
+    "node_modules/vite": { version: "8.0.0", resolved: "https://registry.npmjs.org/vite/-/vite-8.0.0.tgz", integrity: "sha512-BBBB" },
+  },
+});
+const pnpmLock = "lockfileVersion: '9.0'\n\npackages:\n\n  vite@8.0.0:\n    resolution: {integrity: sha512-BBBB}\n\n  vitest@5.0.0:\n    resolution: {integrity: sha512-AAAA}\n";
 
 describe("structured Vitest evidence", () => {
   test("requires assertion evidence and an agreeing process exit", () => {
@@ -20,6 +29,8 @@ describe("structured Vitest evidence", () => {
     expect(classifyVitestEvidence(evidence("fail"), success, "regression", "regression.test.ts").status).toBe("invalid");
     expect(classifyVitestEvidence(evidence("pass"), success, "regression", "regression.test.ts").status).toBe("passed");
     expect(classifyVitestEvidence(evidence("fail", "TypeError"), failing, "regression", "regression.test.ts").status).toBe("invalid");
+    const spoofed = evidence("fail"); spoofed.files[0]!.task.tasks![0]!.result!.errors![0]!.stack = "AssertionError: fake\n at /repo/regression.test.ts:1:1";
+    expect(classifyVitestEvidence(spoofed, failing, "regression", "regression.test.ts").status).toBe("invalid");
     expect(classifyVitestEvidence(evidence("fail"), failing, "regression", "regression.test.ts").output).toContain("expected 1 to be 2");
     expect(classifyVitestEvidence(evidence("pass"), success, "regression", "regression.test.ts").output).toContain("1 passed");
   });
@@ -45,7 +56,7 @@ describe("structured Vitest evidence", () => {
 test("Docker project runner mounts only isolated data and disables networking for tests", async () => {
   const root = mkdtempSync(join(tmpdir(), "vouch-docker-test-")); roots.push(root);
   const baselineDir = join(root, "baseline"); mkdirSync(baselineDir);
-  writeFileSync(join(baselineDir, "package.json"), '{"devDependencies":{"vitest":"^5.0.0"}}'); writeFileSync(join(baselineDir, "package-lock.json"), "{}");
+  writeFileSync(join(baselineDir, "package.json"), '{"devDependencies":{"vitest":"^5.0.0"}}'); writeFileSync(join(baselineDir, "package-lock.json"), npmLock);
   const workspace: LocalWorkspace = { dir: join(root, "candidate"), baselineDir, verificationDir: join(root, "verification"), commit: "0".repeat(40), files: [], protectedPaths: [], regressionPath: "regression.test.ts", regressionHash: "x", cleanup() {} };
   const calls: Array<{ args: string[]; opts: ExecOptions }> = [];
   const sentinel = "test-sentinel-do-not-forward"; process.env.VOUCH_SANDBOX_TEST_SECRET = sentinel;
@@ -61,10 +72,7 @@ test("Docker project runner mounts only isolated data and disables networking fo
       mkdirSync(join(setup, "node_modules", "vite"), { recursive: true });
       writeFileSync(join(setup, "node_modules", "vite", "package.json"), '{"version":"8.0.0"}');
     }
-    if (args.includes("--network=none")) {
-      const mount = args.find(arg => arg.endsWith(",dst=/evidence"))!;
-      writeFileSync(join(mount.slice("type=bind,src=".length, -",dst=/evidence".length), "result.json"), JSON.stringify(evidence("pass")));
-    }
+    if (args.includes("/vouch/run.mjs")) return { ...success, stdout: `__VOUCH_EVIDENCE_V1__${Buffer.from(JSON.stringify(evidence("pass"))).toString("base64")}\n` };
     return success;
   } });
   try {
@@ -72,8 +80,11 @@ test("Docker project runner mounts only isolated data and disables networking fo
     const result = await runner.runTests(baselineDir, "regression", { timeoutMs: 1000 }); expect(result.status).toBe("passed");
     const run = calls.find(call => call.args.includes("/vouch/run.mjs"))!;
     expect(run.args).toContain("--cap-drop=ALL"); expect(run.args).toContain("--read-only"); expect(run.args).toContain("--pids-limit=128");
-    expect(run.args).toContain("--log-driver=none");
+    expect(run.args).toContain("--log-driver=local");
+    expect(run.args).toContain("compress=false");
     expect(run.args).toContain(`type=bind,src=${baselineDir},dst=/repo,readonly`);
+    expect(run.args.some(arg => arg.includes("dst=/evidence"))).toBe(false);
+    expect(run.opts.maxOutputBytes).toBe(3_000_000);
     expect(run.args.join(" ")).not.toContain("docker.sock");
     expect(JSON.stringify(calls)).not.toContain(sentinel);
     expect(calls.some(call => call.args.includes("--ignore-scripts"))).toBe(true);
@@ -86,7 +97,7 @@ test("Docker project runner rejects a declared npm version that differs from the
   const root = mkdtempSync(join(tmpdir(), "vouch-docker-npm-version-")); roots.push(root);
   const baselineDir = join(root, "baseline"); mkdirSync(baselineDir);
   writeFileSync(join(baselineDir, "package.json"), '{"packageManager":"npm@11.0.0","devDependencies":{"vitest":"5.0.0"}}');
-  writeFileSync(join(baselineDir, "package-lock.json"), "{}");
+  writeFileSync(join(baselineDir, "package-lock.json"), npmLock);
   const workspace: LocalWorkspace = { dir: join(root, "candidate"), baselineDir, verificationDir: join(root, "verification"), commit: "0".repeat(40), files: [], protectedPaths: [], regressionPath: "regression.test.ts", regressionHash: "x", cleanup() {} };
   const runner = new DockerProjectRunner({ invoke: async (_cmd, args) => args.at(-2) === "npm" && args.at(-1) === "--version" ? { ...success, stdout: "10.9.8\n" } : success });
   await expect(runner.prepare(workspace)).rejects.toThrow("runtime image provides npm@10.9.8");
@@ -97,7 +108,7 @@ test("pnpm setup ignores repository pnpm hooks", async () => {
   const root = mkdtempSync(join(tmpdir(), "vouch-docker-pnpm-")); roots.push(root);
   const baselineDir = join(root, "baseline"); mkdirSync(baselineDir);
   writeFileSync(join(baselineDir, "package.json"), '{"packageManager":"pnpm@10.33.3","devDependencies":{"vitest":"5.0.0"}}');
-  writeFileSync(join(baselineDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  writeFileSync(join(baselineDir, "pnpm-lock.yaml"), pnpmLock);
   const workspace: LocalWorkspace = { dir: join(root, "candidate"), baselineDir, verificationDir: join(root, "verification"), commit: "0".repeat(40), files: [], protectedPaths: [], regressionPath: "regression.test.ts", regressionHash: "x", cleanup() {} };
   let installArgs: string[] = [];
   const runner = new DockerProjectRunner({ invoke: async (_cmd, args) => {

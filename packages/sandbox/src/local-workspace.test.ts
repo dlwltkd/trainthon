@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyLocalPatch, captureLocalChanges, createVerificationWorkspace, prepareLocalWorkspace, writeLocalSource } from "./local-workspace.js";
@@ -13,6 +13,8 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), "vouch-workspace-test-")); roots.push(root);
   const repo = join(root, "repo"); mkdirSync(join(repo, "src"), { recursive: true });
   writeFileSync(join(repo, "src", "sum.ts"), "export const sum = (a: number, b: number) => a - b;\n");
+  writeFileSync(join(repo, "src", "tool.js"), "#!/usr/bin/env node\n");
+  chmodSync(join(repo, "src", "tool.js"), 0o755);
   writeFileSync(join(repo, "package.json"), '{"devDependencies":{"vitest":"^5.0.0"}}');
   writeFileSync(join(repo, "package-lock.json"), "{}");
   writeFileSync(join(repo, ".env"), "SENTINEL=hidden");
@@ -42,6 +44,7 @@ describe("committed repository workspace", () => {
     }
     expect(workspace.protectedPaths).toContain("bootstrap.ts");
     expect(workspace.regressionHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(statSync(join(workspace.dir, "src", "tool.js")).mode & 0o111).toBe(0o111);
     workspace.cleanup();
     expect(readFileSync(join(f.repo, "src", "sum.ts"), "utf8")).toBe("uncommitted edit\n");
   });

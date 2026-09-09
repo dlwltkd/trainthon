@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   closeSync,
+  chmodSync,
   constants,
   cpSync,
   existsSync,
@@ -14,6 +15,7 @@ import {
   readSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -27,6 +29,7 @@ const MAX_FILE_BYTES = 2_000_000;
 const MAX_REPOSITORY_BYTES = 30_000_000;
 const MAX_FILES = 3000;
 const records = new WeakMap<LocalWorkspace, Map<string, Buffer>>();
+const recordModes = new WeakMap<LocalWorkspace, Map<string, number>>();
 export const localProcessEnv = (): NodeJS.ProcessEnv => ({ PATH: process.env.PATH, LANG: "C.UTF-8", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", GIT_NO_REPLACE_OBJECTS: "1" });
 const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -130,6 +133,7 @@ export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions):
   if (!/^[a-f0-9]{40,64}$/.test(commit)) throw new Error("Git did not resolve a commit");
   const tree = (await git(repoPath, ["ls-tree", "-rlz", "--full-tree", commit], opts.signal)).toString();
   const original = new Map<string, Buffer>();
+  const modes = new Map<string, number>();
   let bytes = 0;
   for (const entry of tree.split("\0").filter(Boolean)) {
     opts.signal?.throwIfAborted();
@@ -143,11 +147,13 @@ export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions):
     bytes += Number(size);
     if (bytes > MAX_REPOSITORY_BYTES || original.size >= MAX_FILES) throw new Error("repository exceeds MVP snapshot limits (30 MB / 3000 files)");
     original.set(path, await git(repoPath, ["cat-file", "blob", oid], opts.signal));
+    modes.set(path, mode === "100755" ? 0o755 : 0o644);
   }
   const supplied = safePath(repoPath, opts.regressionPath);
   if (!existsSync(supplied)) throw new Error("supplied regression must be an existing regular file");
   const regression = readBoundedRegularFile(supplied, MAX_FILE_BYTES, "regression");
   original.set(opts.regressionPath, regression);
+  modes.set(opts.regressionPath, 0o644);
   mkdirSync(resolve(opts.workspacesDir), { recursive: true, mode: 0o700 });
   const root = mkdtempSync(join(resolve(opts.workspacesDir), "local-"));
   const supportFiles = configuredSupportFiles(original);
@@ -162,9 +168,11 @@ export async function prepareLocalWorkspace(opts: PrepareLocalWorkspaceOptions):
       const target = join(workspace.baselineDir, path);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content);
+      chmodSync(target, modes.get(path) ?? 0o644);
     }
     cpSync(workspace.baselineDir, workspace.dir, { recursive: true });
     records.set(workspace, original);
+    recordModes.set(workspace, modes);
     return workspace;
   } catch (error) { workspace.cleanup(); throw error; }
 }
@@ -179,6 +187,7 @@ export function writeLocalSource(workspace: LocalWorkspace, path: string, conten
 
 function changes(workspace: LocalWorkspace): Map<string, Buffer | null> {
   const original = records.get(workspace);
+  const modes = recordModes.get(workspace);
   if (!original) throw new Error("unknown local workspace");
   const current = walk(workspace.dir);
   const all = new Set([...original.keys(), ...current]);
@@ -188,6 +197,10 @@ function changes(workspace: LocalWorkspace): Map<string, Buffer | null> {
     const data = existsSync(abs) ? readFileSync(abs) : null;
     if (data && data.length > MAX_FILE_BYTES) throw new Error(`source file exceeds limit: ${path}`);
     const prior = original.get(path);
+    const expectedMode = modes?.get(path) ?? 0o644;
+    if (data && Boolean(statSync(abs).mode & 0o111) !== Boolean(expectedMode & 0o111)) {
+      throw new Error(`file mode changed: ${path}`);
+    }
     if (prior && data && prior.equals(data)) continue;
     if (!isLocalSourcePath(workspace, path)) throw new Error(`protected file changed: ${path}`);
     changed.set(path, data);
@@ -202,6 +215,7 @@ export async function createVerificationWorkspace(workspace: LocalWorkspace): Pr
   for (const [path, bytes] of records.get(workspace)!) {
     const target = join(workspace.verificationDir, path);
     mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, bytes);
+    chmodSync(target, recordModes.get(workspace)?.get(path) ?? 0o644);
   }
   for (const [path, bytes] of changed) {
     const target = join(workspace.verificationDir, path);
@@ -230,11 +244,13 @@ export async function captureLocalChanges(workspace: LocalWorkspace): Promise<Di
         const target = join(before, path);
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, prior);
+        chmodSync(target, recordModes.get(workspace)?.get(path) ?? 0o644);
       }
       if (current !== null && current !== undefined) {
         const target = join(after, path);
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, current);
+        chmodSync(target, recordModes.get(workspace)?.get(path) ?? 0o644);
       }
     }
     const result = await runCommand("git", ["diff", "--no-index", "--no-renames", "--no-ext-diff", "--text", "--", "before", "after"], {

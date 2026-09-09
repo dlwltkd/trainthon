@@ -9,6 +9,7 @@
   "dependencies": {
     "@vouch/engine": "workspace:*",
     "@vouch/protocol": "workspace:*",
-    "@vouch/model": "workspace:*"
+    "@vouch/model": "workspace:*",
+    "@vouch/sandbox": "workspace:*"
   }
 }

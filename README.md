@@ -69,3 +69,19 @@ Artifacts are written below `runs/<runId>/` before cleanup.
 
 This slice supports Node projects with one npm or pnpm lockfile, Vitest 3–5,
 and Vite 6.1 or newer. It requires Node 22+, pnpm, Git, and Docker.
+Functional tests must live in conventional protected test paths; a collected
+test outside those paths is rejected during setup.
+
+The dependency-install container has network access during preparation. Install
+scripts, pnpm hooks, linked/file/custom-tarball dependencies, and non-npmjs URLs
+in npm locks are rejected. Test containers have no network, return structured
+evidence through a bounded output channel, and use a read-only repository mount. Each record includes the
+pinned container digest, package-manager and Vitest/Vite versions, lockfile hash,
+resolved input hash, and before/after test manifests.
+
+The local MVP is for a repository and lockfile controlled by the person running
+Vouch. It executes that repository's locked Vitest package and test config, so
+its evidence is not an attestation against a deliberately malicious repository
+or config. Application modules imported by tests remain application code and can
+be repaired; the assertions only prove the behavior they cover. The frozen
+benchmark uses a separate hidden grader for performance claims.

@@ -168,8 +168,18 @@ The first existing-repository harness slice is now implemented in the CLI. It
 accepts a local Git root, pinned ref, supplied report, and designated regression;
 uses the project's lockfile and Vitest installation in Docker; permits source-only
 changes; and persists the patch, structured before/after test evidence, run record,
-and correlated event log before cleanup. It does not load a benchmark task or
-hidden grader.
+and correlated event log before cleanup. Records bind the run to the commit,
+regression, lockfile, pinned image, runner versions, and exact test inventories.
+Dependency preparation rejects install scripts and local/custom package sources;
+tests run offline with bounded structured output. It does not load a benchmark task
+or hidden grader.
+
+This local slice assumes the repository owner trusts the selected commit,
+lockfile, Vitest dependency, and test configuration. Those project-controlled
+components execute during verification, so the artifact is observable test
+evidence rather than a cryptographic attestation against a hostile repository.
+The exact supplied test and conventional test files are immutable, while normal
+application modules they import remain editable so a repair is possible.
 
 The GitHub-hosted product path still needs these integration changes:
 

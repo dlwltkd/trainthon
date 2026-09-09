@@ -23,6 +23,13 @@ describe("run CLI options", () => {
     expect(parseRunOptions({ task: "fixture", condition: "C", mode: "scripted" })).toMatchObject({ kind: "task", mode: "scripted" });
   });
 
+  it("does not accept or record an unused model in scripted mode", () => {
+    const task = parseRunOptions({ task: "fixture", condition: "C", mode: "scripted" });
+    expect(task.model.model).toBe("scripted");
+    expect(() => parseRunOptions({ task: "fixture", condition: "C", mode: "scripted", model: "claude-unused" })).toThrow("only supported in live mode");
+    expect(() => parseRunOptions({ ...repository, mode: "scripted", patch: "change.patch", provider: "openai" })).toThrow("only supported in live mode");
+  });
+
   it("rejects task IDs that escape the benchmark directory", () => {
     expect(() => parseRunOptions({ task: "../fixture", mode: "scripted", condition: "C" })).toThrow("invalid benchmark task ID");
   });

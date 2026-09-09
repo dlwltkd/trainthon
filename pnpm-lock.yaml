@@ -32,6 +32,9 @@ importers:
       '@vouch/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@vouch/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
 
   packages/engine:
     dependencies:
