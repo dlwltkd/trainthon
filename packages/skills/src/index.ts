@@ -75,7 +75,7 @@ export const REPOSITORY_REVIEW_GUIDANCE = {
 
 export const SOURCE_REPAIR_GUIDANCE = {
   id: "prompt-source-remediation",
-  version: "1.3.0",
+  version: "1.4.0",
 } as const;
 
 const sourceSecurityReview: LocalSkill = {
@@ -188,11 +188,12 @@ export const SOURCE_REPAIR_SKILLS: readonly LocalSkill[] = [
   {
     id: "change-validation",
     name: "Inspect source changes and validation limits",
-    version: "1.1.0",
+    version: "1.2.0",
     roles: ["blue"],
     description: "Inspect the final candidate diff and existing evidence without claiming unexecuted tests passed.",
     instructions: [
       "Call inspect_diff after the final edit and inspect its patch, changedFiles, lineCount, and checks. Reread changed source and relevant callers to check the intended invariant and unrelated behavior.",
+      "Inspect checks.syntax for every changed file. A valid Python AST result establishes parsing only, not runtime behavior. Correct invalid syntax at the reported line and column, then inspect again; unavailable and unsupported results are unperformed checks, never passes.",
       "Confirm every changed file is justified by a recorded finding and respect the reported protectedFilesUnchanged result. Do not mark validation complete when the diff is unavailable or violates a boundary.",
       "Compare the final diff against the original acceptance conditions, including permitted behavior, denials, boundary values, failure exits, and unchanged interfaces. Check whether any changed line is unrelated cleanup and avoid broadening the patch. Source inspection supports only a candidate correction, not a passing runtime regression suite.",
       "The result testsRun:false means no tests ran. Existing test source or supplied historical output does not establish that the current candidate passed tests, type checks, or runtime verification.",

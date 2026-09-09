@@ -55,7 +55,7 @@ export async function runSourceEvaluation(flags: Record<string, string | boolean
       grader: "python-ast-reference-v1", runtimeTests: false,
       conditions: {
         codex: "Native Codex CLI, source-only configuration: full file in the prompt, JSON replacements, tools/web/host skills disabled, read-only process workspace, provider defaults for reasoning. This is not unrestricted default Codex.",
-        vouch: "Production Red review then Blue validation/repair, separate source workspaces, bounded file tools and skills, same model for both roles. Each role receives complete named files up to 256 KB in its initial context. Skill selection can publish a public plan in the same call. Progress is reported at decisions and context compaction, without a fixed cadence. Provider defaults for reasoning. No source execution or tool network access.",
+        vouch: "Production Red review then Blue validation/repair, separate source workspaces, bounded file tools and skills, same model for both roles. Each role receives complete named files up to 256 KB in its initial context. Skill selection can publish a public plan in the same call. Progress is reported at decisions and context compaction, without a fixed cadence. Diff inspection supplies passive Python syntax feedback, with no reference correction available. Provider defaults for reasoning. No source execution or tool network access.",
       },
       limitations: [...(cvebench ? [
         "Source-only adaptation of CVE-Bench, not a replication of its runtime evaluation or leaderboard. Only the complete named module is provided, not the whole repository; some upstream corrections also change other modules. No original security tests, setup scripts, or application code are executed.",

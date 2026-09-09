@@ -127,11 +127,13 @@ describe("source review and remediation skills", () => {
     const validation = SOURCE_REPAIR_SKILLS.find(skill => skill.id === "change-validation")!.instructions;
     expect(validation).toContain("testsRun:false means no tests ran");
     expect(validation).toContain("An earlier diff does not validate a later edit");
+    expect(validation).toContain("checks.syntax");
+    expect(validation).toContain("unavailable and unsupported results are unperformed checks, never passes");
     expect(validation).toContain("do not edit files");
     expect(systemPromptRepositoryReview()).toContain("result scope is source_review");
     expect(systemPromptRepositoryReview()).not.toContain("source-remediation");
     expect(REPOSITORY_REVIEW_GUIDANCE.version).toBe("1.4.0");
-    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.3.0");
+    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.4.0");
   });
 
   test("separates Red's read-only discovery from Blue's independent source validation", () => {

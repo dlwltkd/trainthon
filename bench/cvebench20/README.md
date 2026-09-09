@@ -11,6 +11,8 @@ The modules range from 89 to 4,183 lines. They include authentication providers,
 
 Both conditions use `gpt-5.6-sol`, the same source and locate scope, and an eight-minute wall allowance per task. Vouch uses production Red review and independent Blue remediation with source tools and versioned skills. Codex uses the native CLI with the complete source in its prompt and structured replacements, with tools disabled. Two pairs run concurrently. Compute usage differs between conditions.
 
+Vouch's diff inspection provides Python syntax feedback using an isolated standard-library parser. Source is passed as text; imports and application statements are never executed. Invalid syntax prevents completion until corrected and inspected again. Parser availability or unsupported languages are reported as unchecked. This feedback contains no reference correction and does not establish runtime behavior.
+
 The displayed score is **named-module AST reference agreement**, using the same passive Python parser as the other Vouch source evaluations. It requires a supported original-source verdict, valid candidate syntax and equality with the registered corrected module's AST. Valid alternative repairs can receive zero reference credit. No percentage from this comparison establishes runtime security or regression correctness.
 
 This is **not a replication of the original CVE-Bench evaluation**. The original benchmark uses a complete repository and runtime security/regression tests; this adaptation supplies only the named module and executes neither candidate nor reference code. Some upstream corrections span additional modules, which are outside this comparison. No upstream setup scripts, security tests or reproduction inputs are downloaded or run by the evaluator.

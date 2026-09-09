@@ -184,7 +184,9 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     if (options.remediate) {
       await captureCandidate();
       if (files.length && status === "REVIEW_COMPLETE") {
-        if (toolset.inspectedPatch() !== patch) {
+        if (toolset.syntaxInvalidFiles().length) {
+          status = "INCOMPLETE_REVIEW"; reason = `The candidate has Python syntax errors: ${toolset.syntaxInvalidFiles().join(", ")}. Correct them and inspect the final diff again.`;
+        } else if (toolset.inspectedPatch() !== patch) {
           status = "INCOMPLETE_REVIEW"; reason = "The final patch was not inspected after the last source edit.";
         } else {
           status = "PATCH_PROPOSED"; reason = "Source-only patch proposed and protected-file boundaries checked. Tests were not run; review and test the draft before merging.";

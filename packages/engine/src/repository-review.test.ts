@@ -82,6 +82,31 @@ function assertFinal(record: Awaited<ReturnType<typeof executeRepositoryReview>>
 describe("prompt-driven source review", () => {
   const reviewModel = { provider: "compatible" as const, model: "review-test", baseURL: "https://api.routeway.ai/v1" };
 
+  it.each([false, true])("requires correction and fresh diff inspection after a Python syntax error (corrected=%s)", async correctedSyntax => {
+    const f = fixture();
+    writeFileSync(join(f.repoPath, "policy.py"), "def add(a, b):\n    return a - b\n");
+    f.git("add", "policy.py"); f.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Python source fixture");
+    const runner = new ScriptedRunner(async tools => {
+      await tools.use_skill!({ skillId: "source-security-review", reason: "Inspect the supplied arithmetic source.", progress: progress(["policy.py"]) });
+      await tools.report_finding!({ ...finding, evidence: ["policy.py"] });
+      await tools.use_skill!({ skillId: "source-remediation", reason: "Correct the arithmetic operation." });
+      await tools.write_file!({ path: "policy.py", content: "def add(a, b)\n    return a + b\n" });
+      const broken = await inspect(tools);
+      expect(broken).toMatchObject({ checks: { testsRun: false, syntax: [{ path: "policy.py", status: "invalid", line: 1 }] } });
+      if (correctedSyntax) {
+        await tools.use_skill!({ skillId: "source-remediation", reason: "Correct the parser-reported syntax error." });
+        await tools.edit_file!({ path: "policy.py", oldText: "def add(a, b)\n", newText: "def add(a, b):\n" });
+        expect(await inspect(tools)).toMatchObject({ checks: { testsRun: false, syntax: [{ path: "policy.py", status: "valid" }] } });
+      }
+      return "Reviewed the candidate source; no runtime tests were performed.";
+    });
+    const record = await executeRepositoryReview({ ...f.options, prompt: "Correct the arithmetic in policy.py.", remediate: true, runner });
+    expect(record.status).toBe(correctedSyntax ? "PATCH_PROPOSED" : "INCOMPLETE_REVIEW");
+    if (!correctedSyntax) expect(record.reason).toContain("Python syntax errors: policy.py");
+    expect(readFileSync(join(f.repoPath, "policy.py"), "utf8")).toContain("return a - b");
+    assertFinal(record, f);
+  });
+
   it("supplies the same pinned source independently to both roles without requiring duplicate file calls", async () => {
     const f = fixture();
     const runner = (role: "red" | "blue") => ({ run: async (input: Parameters<ScriptedRunner["run"]>[0]) => {

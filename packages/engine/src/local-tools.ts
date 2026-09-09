@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import type { EventInput, FindingReportedEvent, FindingAssessedEvent } from "@vouch/protocol";
 import type { AgentTool } from "@vouch/model";
 import { createAgentTrace, type AgentTrace, type TraceWorkspace } from "./agent-trace.js";
+import { checkSourceSyntax } from "./source-syntax.js";
 import { REPOSITORY_REVIEW_SKILLS, SOURCE_REPAIR_SKILLS } from "@vouch/skills";
 import {
   listDirTool,
@@ -208,6 +209,7 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
   const assessments = new Map<string, Omit<FindingAssessedEvent, "runId" | "seq" | "ts">>();
   const changeFindings = new Map<string, string[]>();
   let inspectedPatch: string | undefined;
+  let syntaxInvalidFiles: string[] = [];
   const findingSchema = z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]{1,60}$/), title: z.string().trim().min(1).max(180),
     severity: z.enum(["info", "low", "medium", "high", "critical"]), confidence: z.enum(["confirmed", "potential"]),
@@ -264,17 +266,21 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
       if (!isLocalSourcePath(repair, path)) throw new Error(`only application source files may be edited: ${path}`);
       const related = [...findings.values()].filter(f => f.confidence === "confirmed" && f.severity !== "info" && (findingId ? f.findingId === findingId : f.evidence.includes(path)));
       if (!related.length) throw new Error("record a confirmed source-backed finding for this file or supply its findingId before editing");
-      writeLocalSource(repair, path, content()); trace.observe([path], true); inspectedPatch = undefined;
+      writeLocalSource(repair, path, content()); trace.observe([path], true); inspectedPatch = undefined; syntaxInvalidFiles = [];
       changeFindings.set(path, related.map(f => f.findingId));
       return { ok: true, path, findingIds: changeFindings.get(path) };
     };
     tools.push(defineTool("write_file", "Apply a minimal application source change for a confirmed finding. Provide findingId when adding a file or changing a related file outside the finding's evidence. Requires source-remediation skill. Tests and configuration are protected. Prefer edit_file for an existing large file.", z.object({ path: z.string().min(1).max(500), content: z.string().max(2_000_000), findingId: z.string().max(60).optional() }), ({ path, content, findingId }) => queue.run(() => applySourceChange(path, findingId, () => content))));
     tools.push(defineTool("edit_file", "Replace exactly one literal oldText occurrence with newText in existing application source, preserving the rest of the file. Read the relevant page first. Rejects missing or ambiguous matches. Requires a confirmed finding and source-remediation skill; tests and configuration remain protected. Args: { path, oldText, newText, findingId? }.", editSchema, ({ path, oldText, newText, findingId }) => queue.run(() => applySourceChange(path, findingId, () => replaceExact(repositoryText(workspace, path), oldText, newText)))));
-    tools.push(defineTool("inspect_diff", "Inspect the exact candidate diff and enforce protected file boundaries. Does not run tests or prove the patch correct. Requires change-validation skill.", z.object({}), () => queue.run(async () => {
+    tools.push(defineTool("inspect_diff", "Inspect the exact candidate diff, enforce protected file boundaries, and parse changed Python source for syntax errors without executing or importing it. Invalid syntax must be corrected before completion. Other languages are marked unsupported. Does not run tests or prove the patch correct. Requires change-validation skill.", z.object({}), () => queue.run(async () => {
       signal.throwIfAborted(); trace.requireReady();
       if (trace.activeSkill() !== "change-validation") throw new Error("load change-validation before inspecting the final diff");
-      const diff = await captureLocalChanges(repair); signal.throwIfAborted(); inspectedPatch = diff.patch;
-      return { ...diff, checks: { protectedFilesUnchanged: true, testsRun: false } };
+      const diff = await captureLocalChanges(repair); signal.throwIfAborted();
+      const syntax = [];
+      for (const path of diff.changedFiles) syntax.push({ path, ...await checkSourceSyntax(path, repositoryText(workspace, path, 2_000_000), signal) });
+      syntaxInvalidFiles = syntax.filter(file => file.status === "invalid").map(file => file.path);
+      inspectedPatch = syntaxInvalidFiles.length ? undefined : diff.patch;
+      return { ...diff, checks: { protectedFilesUnchanged: true, testsRun: false, syntax } };
     })));
   }
   const sourceContext = (prompt: string, maxBytes: number, maxFiles: number) => {
@@ -294,7 +300,7 @@ export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortS
       files: supplied.map(({ path, content }) => ({ path, bytes: Buffer.byteLength(content), sha256: createHash("sha256").update(content).digest("hex") })),
     };
   };
-  return { tools, sourceContext, drain: () => queue.drain(), findings: () => [...findings.values()], assessments: () => [...assessments.values()], unassessedFindingIds: () => redFindingIds.filter(id => !assessments.has(id)), observedFiles: () => trace.observedFiles(), inspectedPatch: () => inspectedPatch, changeFindings: () => Object.fromEntries(changeFindings) };
+  return { tools, sourceContext, drain: () => queue.drain(), findings: () => [...findings.values()], assessments: () => [...assessments.values()], unassessedFindingIds: () => redFindingIds.filter(id => !assessments.has(id)), observedFiles: () => trace.observedFiles(), inspectedPatch: () => inspectedPatch, syntaxInvalidFiles: () => [...syntaxInvalidFiles], changeFindings: () => Object.fromEntries(changeFindings) };
 }
 
 export interface LocalRepairToolset {
