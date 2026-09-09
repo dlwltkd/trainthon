@@ -7,7 +7,7 @@ import {
 } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 import { RunBudget } from "./budget.js";
-import { SdkRunner } from "./sdk-runner.js";
+import { SdkRunner, type MissingUsagePolicy } from "./sdk-runner.js";
 import type { AgentRunner } from "./types.js";
 
 export type ProviderName = "anthropic" | "openai";
@@ -42,7 +42,7 @@ export const PROVIDERS: Record<ProviderName, ProviderInfo> = {
   openai: {
     name: "openai",
     apiKeyEnv: "OPENAI_API_KEY",
-    defaultModel: "gpt-5.1",
+    defaultModel: "gpt-5.6-sol",
   },
 };
 
@@ -66,6 +66,7 @@ export function createCompatibleRunner(opts: {
   baseURL: string;
   name?: string;
   fetch?: OpenAICompatibleProviderSettings["fetch"];
+  missingUsagePolicy?: MissingUsagePolicy;
 }): AgentRunner {
   const baseURL = normalizeCompatibleBaseURL(opts.baseURL);
   const provider = createOpenAICompatible({
@@ -80,7 +81,10 @@ export function createCompatibleRunner(opts: {
       return { ...rest, max_completion_tokens: maxTokens };
     },
   });
-  return new SdkRunner((modelId: string) => provider(modelId));
+  return new SdkRunner(
+    (modelId: string) => provider(modelId),
+    { missingUsagePolicy: opts.missingUsagePolicy },
+  );
 }
 
 export function createRunner(provider: ProviderName, apiKey: string): AgentRunner {
@@ -173,6 +177,10 @@ export function createRunnerForSpec(
       apiKey: key,
       baseURL: canonical.baseURL!,
       name: "gateway",
+      missingUsagePolicy: canonical.baseURL === GATEWAYS.routeway
+        && canonical.model === ROUTEWAY_GLM_FLASH_UNCENSORED
+        ? "conservative-bound"
+        : "strict",
     });
   }
   return createRunner(canonical.provider, key);
@@ -193,6 +201,7 @@ export interface ModelProbeResult {
   latencyMs: number;
   inputTokens: number;
   outputTokens: number;
+  usageKnown?: boolean;
   steps?: 1;
   toolCalls?: 1;
 }
@@ -243,6 +252,7 @@ export async function probeModel(
       latencyMs: Math.max(0, Math.floor(performance.now() - startedAt)),
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
+      usageKnown: budget.usageKnown,
       steps: 1,
       toolCalls: 1,
     };

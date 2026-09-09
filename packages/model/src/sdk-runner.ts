@@ -4,6 +4,12 @@ import { emitUsage, eventContext, executeLoggedTool, toolEventArgs } from "./eve
 import type { AgentRunInput, AgentRunResult, AgentRunner } from "./types.js";
 
 export type ModelResolver = (modelId: string) => LanguageModel;
+export type MissingUsagePolicy = "strict" | "conservative-bound";
+
+export interface SdkRunnerOptions {
+  /** How to account for a successful response that omits numeric token usage. */
+  missingUsagePolicy?: MissingUsagePolicy;
+}
 
 type RequestForEstimate = {
   prompt: readonly unknown[];
@@ -59,7 +65,10 @@ export function estimateRequestInputTokens(params: RequestForEstimate): number {
 }
 
 export class SdkRunner implements AgentRunner {
-  constructor(private readonly resolve: ModelResolver) {}
+  constructor(
+    private readonly resolve: ModelResolver,
+    private readonly options: SdkRunnerOptions = {},
+  ) {}
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const budget = input.budget ?? new RunBudget(input.budgets);
@@ -98,7 +107,26 @@ export class SdkRunner implements AgentRunner {
               const reportedOutput = result.usage.outputTokens;
               if (![reportedInput, reportedOutput].every(value => Number.isSafeInteger(value) && value! >= 0)) {
                 budget.markUsageUnknown();
-                throw new Error("Provider did not return complete token usage");
+                if (this.options.missingUsagePolicy !== "conservative-bound") {
+                  throw new Error("Provider did not return complete token usage");
+                }
+                inTok = estimatedInputTokens;
+                outTok = params.maxOutputTokens ?? 0;
+                releaseReservation();
+                budget.recordTokens(inTok, outTok);
+                receivedUsage = true;
+                inputTokens += inTok;
+                outputTokens += outTok;
+                budget.assertActive();
+                return {
+                  ...result,
+                  usage: {
+                    ...result.usage,
+                    inputTokens: inTok,
+                    outputTokens: outTok,
+                    totalTokens: inTok + outTok,
+                  },
+                };
               }
               inTok = reportedInput!;
               outTok = reportedOutput!;

@@ -35,16 +35,50 @@ type ModelReply = Awaited<ReturnType<MockLanguageModelV2["doGenerate"]>>;
 function reply(content: ModelReply["content"] = [{ type: "text", text: "Done" }], tokens = 10): ModelReply {
   return { content, finishReason: content.some((part) => part.type === "tool-call") ? "tool-calls" : "stop", usage: { inputTokens: tokens, outputTokens: 2, totalTokens: tokens + 2 }, warnings: [] };
 }
+function replyWithoutUsage(): ModelReply {
+  return {
+    ...reply(),
+    usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
+  };
+}
 function toolReply(name = "read_file", callId = "read-1") {
   return reply([{ type: "tool-call", toolCallId: callId, toolName: name, input: JSON.stringify({ path: "src/example.ts" }) }]);
 }
 function fileTool(execute = async (_args: unknown): Promise<unknown> => "fixture") {
   return { name: "read_file", description: "Read fixture text", schema: z.object({ path: z.string() }), execute };
 }
+function routewayProbeResponse(
+  body: Record<string, unknown>,
+  usage: { prompt_tokens: number | null; completion_tokens: number | null; total_tokens: number | null },
+): Response {
+  const nonce = JSON.stringify(body).match(/[a-f0-9]{32}/)?.[0];
+  if (!nonce) throw new Error("probe nonce missing from request");
+  return new Response(JSON.stringify({
+    id: "chatcmpl-probe",
+    object: "chat.completion",
+    created: 1,
+    model: body.model,
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "call-probe",
+          type: "function",
+          function: { name: "connection_probe", arguments: JSON.stringify({ nonce }) },
+        }],
+      },
+      finish_reason: "tool_calls",
+    }],
+    usage,
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
 
 afterEach(() => {
   for (const item of allocated.splice(0)) item.dispose();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("RunBudget", () => {
@@ -117,6 +151,33 @@ describe("SdkRunner", () => {
     run.toolChoice = "required";
     await new SdkRunner(() => model).run(run);
     expect(model.doGenerateCalls[0]?.toolChoice).toEqual({ type: "required" });
+  });
+
+  it("rejects missing provider usage in the default strict mode", async () => {
+    const model = new MockLanguageModelV2({ doGenerate: replyWithoutUsage() });
+    const run = input();
+    await expect(new SdkRunner(() => model).run(run)).rejects.toThrow("complete token usage");
+    expect(run.budget!.usageKnown).toBe(false);
+    expect(run.budget!.usage).toEqual({ inputTokens: 0, outputTokens: 0, steps: 1 });
+  });
+
+  it("charges the full reserved bound when missing usage is accepted conservatively", async () => {
+    const model = new MockLanguageModelV2({ doGenerate: replyWithoutUsage() });
+    const run = input(budget({ maxTokens: 2_000, maxSteps: 1 }));
+    const result = await new SdkRunner(
+      () => model,
+      { missingUsagePolicy: "conservative-bound" },
+    ).run(run);
+    const request = model.doGenerateCalls[0]!;
+    const expectedInput = estimateRequestInputTokens(request);
+    const expectedOutput = request.maxOutputTokens!;
+    expect(expectedInput + expectedOutput).toBe(2_000);
+    expect(result).toMatchObject({ inputTokens: expectedInput, outputTokens: expectedOutput, steps: 1 });
+    expect(run.budget!.usage).toEqual({ inputTokens: expectedInput, outputTokens: expectedOutput, steps: 1 });
+    expect(run.budget!.usageKnown).toBe(false);
+    expect(run.events).toContainEqual(expect.objectContaining({
+      type: "model_msg", tokensIn: expectedInput, tokensOut: expectedOutput,
+    }));
   });
 
   it("retains provider usage when a tool fails and emits its error", async () => {
@@ -291,28 +352,7 @@ describe("live provider probe", () => {
     const fetchMock: NonNullable<Parameters<typeof createCompatibleRunner>[0]["fetch"]> = async (input, init) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       requests.push({ url: String(input), headers: new Headers(init?.headers), body });
-      const nonce = JSON.stringify(body).match(/[a-f0-9]{32}/)?.[0];
-      if (!nonce) throw new Error("probe nonce missing from request");
-      return new Response(JSON.stringify({
-        id: "chatcmpl-probe",
-        object: "chat.completion",
-        created: 1,
-        model: ROUTEWAY_GLM_FLASH_UNCENSORED,
-        choices: [{
-          index: 0,
-          message: {
-            role: "assistant",
-            content: null,
-            tool_calls: [{
-              id: "call-probe",
-              type: "function",
-              function: { name: "connection_probe", arguments: JSON.stringify({ nonce }) },
-            }],
-          },
-          finish_reason: "tool_calls",
-        }],
-        usage: { prompt_tokens: 17, completion_tokens: 5, total_tokens: 22 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return routewayProbeResponse(body, { prompt_tokens: 17, completion_tokens: 5, total_tokens: 22 });
     };
     const runner = createCompatibleRunner({
       apiKey: "  routeway-test-secret  ",
@@ -349,6 +389,27 @@ describe("live provider probe", () => {
       latencyMs: expect.any(Number),
     });
     expect(JSON.stringify(result)).not.toContain("routeway-test-secret");
+  });
+
+  it("bounds missing usage only for the exact Routeway GLM model", async () => {
+    const fetchMock: NonNullable<Parameters<typeof createCompatibleRunner>[0]["fetch"]> = vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return routewayProbeResponse(body, { prompt_tokens: null, completion_tokens: null, total_tokens: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const routeway = {
+      provider: "compatible" as const,
+      model: ROUTEWAY_GLM_FLASH_UNCENSORED,
+    };
+    const routewayRunner = createRunnerForSpec(routeway, { ROUTEWAY_API_KEY: "fixture" })!;
+    const result = await probeModel(routeway, { runner: routewayRunner });
+    expect(result.usageKnown).toBe(false);
+    expect(result.inputTokens + result.outputTokens).toBe(4_096);
+
+    const other = { provider: "compatible" as const, model: "other-routeway-model" };
+    const strictRunner = createRunnerForSpec(other, { ROUTEWAY_API_KEY: "fixture" })!;
+    await expect(probeModel(other, { runner: strictRunner })).rejects.toThrow("complete token usage");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("fails when a runner does not perform the required probe call", async () => {

@@ -5,7 +5,7 @@ export type {
   AgentRunner,
 } from "./types.js";
 export { SdkRunner } from "./sdk-runner.js";
-export type { ModelResolver } from "./sdk-runner.js";
+export type { MissingUsagePolicy, ModelResolver, SdkRunnerOptions } from "./sdk-runner.js";
 export { ScriptedRunner } from "./scripted.js";
 export type { Script, ScriptToolMap } from "./scripted.js";
 export {
