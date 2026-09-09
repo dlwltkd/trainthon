@@ -13,6 +13,23 @@ const failure = (overrides: Partial<ConstructorParameters<typeof APICallError>[0
 afterEach(() => vi.useRealTimers());
 
 describe("provider error diagnostics", () => {
+  it("distinguishes a provider context rejection without displaying the response body", () => {
+    const error = providerRequestError(failure({ statusCode: 400, responseBody: JSON.stringify({ error: { code: "context_length_exceeded", message: "private source" } }) })) as ProviderRequestError;
+    expect(error.message).toBe("Model API request failed (HTTP 400; provider context window exceeded).");
+    expect(error.retryable).toBe(false);
+    expect(error.message).not.toContain("private source");
+  });
+
+  it("reports known nested connection codes without exposing endpoint addresses or arbitrary error text", () => {
+    const cause = new AggregateError([Object.assign(new Error("secret endpoint detail"), { code: "ECONNRESET", address: "private-address" })]);
+    const error = providerRequestError(failure({ statusCode: undefined, cause })) as ProviderRequestError;
+    expect(error.message).toBe("Model API request failed (connection error: ECONNRESET).");
+    const unknown = Object.assign(new Error("secret"), { code: "SECRET_VALUE" });
+    expect((providerRequestError(failure({ statusCode: undefined, cause: unknown })) as Error).message).toBe("Model API request failed (connection error).");
+    const cycle: { cause?: unknown } = {}; cycle.cause = cycle;
+    expect((providerRequestError(failure({ statusCode: undefined, cause: cycle })) as Error).message).toBe("Model API request failed (connection error).");
+  });
+
   it("keeps the HTTP status and request ID without copying source or credentials into the message", () => {
     const original = failure({
       message: "provider echoed secret-value",
