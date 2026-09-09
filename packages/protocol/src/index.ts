@@ -134,6 +134,23 @@ export interface RunEndEvent extends BaseEvent {
   elapsedMs: number;
 }
 
+/** Which model actually served a harness role (evidence for the run record). */
+export interface RoleAssignedEvent extends BaseEvent {
+  type: "role_assigned";
+  role: "solo" | "red" | "blue";
+  runner: string;
+}
+
+/**
+ * Condition-C completion gate verdicts, decided by the harness (not the model).
+ * `reproduce`: did Red's PoC fail on the unmodified code?
+ * `verify`: after Blue, does the PoC pass and do public tests pass?
+ */
+export type GateEvent = BaseEvent & { type: "gate" } & (
+  | { phase: "reproduce"; reproduced: boolean; submissions: number }
+  | { phase: "verify"; pocNeutralized: boolean; functionalPassed: boolean; passed: boolean }
+);
+
 export type HarnessEvent =
   | RunStartEvent
   | StateChangeEvent
@@ -143,6 +160,8 @@ export type HarnessEvent =
   | BudgetUpdateEvent
   | DiffSnapshotEvent
   | GradeEvent
+  | RoleAssignedEvent
+  | GateEvent
   | RunEndEvent;
 
 /** Distributive Omit so union members keep their discriminant-specific fields. */

@@ -61,6 +61,13 @@ export async function createWorktree(
   };
 }
 
+/** Revert all agent edits back to the baseline commit (tracked + untracked). */
+export async function resetWorktree(dir: string): Promise<void> {
+  const t = 20_000;
+  await runCommand("git", ["checkout", "--", "."], { cwd: dir, timeoutMs: t });
+  await runCommand("git", ["clean", "-fd"], { cwd: dir, timeoutMs: t });
+}
+
 export interface DiffResult {
   patch: string;
   changedFiles: string[];

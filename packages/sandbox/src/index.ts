@@ -1,6 +1,6 @@
 export { runCommand, runShell } from "./exec.js";
 export type { ExecResult, ExecOptions } from "./exec.js";
-export { createWorktree, getDiff } from "./worktree.js";
+export { createWorktree, getDiff, resetWorktree } from "./worktree.js";
 export type {
   Worktree,
   CreateWorktreeOptions,

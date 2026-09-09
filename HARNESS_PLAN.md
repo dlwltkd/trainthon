@@ -43,6 +43,19 @@ runs/<run_id>.jsonl
 
 세 층이 세 패키지 → 벤치마크 조건이 패키지 토글이 됨.
 
+## 모델 프로바이더 & 역할별 모델
+
+- 게이트웨이는 **범용 OpenAI-호환 프로바이더 하나**로 처리한다(baseURL + key). Routeway
+  (`https://api.routeway.ai/v1`), Vercel AI Gateway, OpenRouter, z.ai가 전부 같은 방식으로 붙는다.
+  네이티브 `anthropic`/`openai`도 유지.
+- **역할별 모델**(`ModelSpec`): 조건 C의 Red(공격/익스플로잇 작성)와 Blue(패치)는 서로 다른 모델을
+  쓸 수 있다. 안전튜닝된 프런티어 모델은 PoC 작성을 거부(refusal)하는 경우가 있어, Red는 덜 제한적인
+  모델(예: Routeway 호스팅 GLM/uncensored 계열)로 라우팅한다. Blue는 프런티어 모델.
+- 안전 범위: 익스플로잇은 **sandbox 안의 fixture/우리 fork 코드에만** 실행한다. 운영 시스템 대상
+  공격이나 무단 스캔은 없다. Red에 덜 제한적인 모델을 쓰는 것은 이 통제된 범위 안에서만 정당하다.
+- B vs C 공정성: Red 모델을 바꾸는 것은 조건 C의 구성일 뿐, baseline B에도 동일 정보·도구·예산을
+  준다. harness 효과와 "정보/모델 효과"를 섞지 않는다.
+
 ## 엔진 상태기계
 
 ```
@@ -111,9 +124,9 @@ injection 등).
 
 | M | 시간 | 완료 기준 |
 | --- | --- | --- |
-| M0 | 0–1h | 모노레포+protocol+이벤트 로거+CLI. `cli run --task hello --condition B`가 올바른 JSONL run 기록 생성 |
-| M1 | 1–3h | sandbox worktree + 도구 + 모델 루프(B). 기본 에이전트가 취약 fixture 수정, grader가 FIXED_VERIFIED |
-| M2 | 3–5h | harness(C) + Red/Blue + 게이트. C가 V 하나 수정 AND 대조 하나 정답(diff=0). = P0 완료 |
+| M0 ✅ | 0–1h | 모노레포+protocol+이벤트 로거+CLI. `cli run --task hello --condition B`가 올바른 JSONL run 기록 생성 |
+| M1 ✅ | 1–3h | sandbox worktree + 도구 + 모델 루프(B). 기본 에이전트가 취약 fixture 수정, grader가 FIXED_VERIFIED |
+| M2 ✅ | 3–5h | harness(C) + Red/Blue + 게이트. C가 V 하나 수정 AND 대조 하나 정답(diff=0). = P0 완료 — `proto-pollution` C→FIXED_VERIFIED, `proto-pollution-fixed` C→NOT_REPRODUCIBLE(diff 0), 스크립트 러너로 검증. 실모델 검증은 키 투입 후 |
 | M3 | 5–7h | SSE + Run 뷰 + replay |
 | M4 | 7–9h | bench 러너 + dev 4개 + 지표. `cli bench --set dev` 지표 표 |
 | M5 | 9–13h | eval 8(실제 CVE 2 fork 포함) + prereg 커밋 + 48회 + 결과 표·차트 + fork draft PR URL |
