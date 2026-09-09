@@ -55,14 +55,22 @@ export function readBoundedRegularFile(path: string, maxBytes: number, label = "
 
 function configuredSupportFiles(original: Map<string, Buffer>): Set<string> {
   const protectedFiles = new Set<string>();
-  const queue = [...original.keys()].filter(path => /(?:^|\/)(?:vitest|vite)[^/]*config\.[cm]?[jt]s$/.test(path));
+  const queue = [...original.keys()].filter(path => /(?:^|\/)(?:vitest|vite)(?:\.[^/]*)*\.(?:config|workspace)\.[cm]?[jt]sx?$/.test(path));
   for (const path of queue) {
     if (protectedFiles.has(path)) continue;
     protectedFiles.add(path);
     const text = original.get(path)?.toString("utf8") ?? "";
-    for (const match of text.matchAll(/["'`]((?:\.\.?\/)[^"'`\n]+)["'`]/g)) {
-      const target = relative("/", resolve("/", dirname(path), match[1]!));
-      for (const candidate of [target, ...[".ts", ".js", ".mts", ".mjs", "/index.ts", "/index.js"].map(ext => target + ext)]) {
+    for (const match of text.matchAll(/\b(?:import|require)\s*\(([^)]*)\)/g)) {
+      const expression = match[1]!.trim();
+      if (!/^(?:"[^"\n]+"|'[^'\n]+'|`[^`$\n]+`)$/.test(expression)) {
+        throw new Error(`dynamic config dependency is unsupported: ${path}`);
+      }
+    }
+    for (const match of text.matchAll(/["'`]([^"'`\n]+)["'`]/g)) {
+      const literal = match[1]!;
+      if (!literal || literal.includes("${") || isAbsolute(literal) || /^[a-z]+:/i.test(literal)) continue;
+      const target = relative("/", resolve("/", dirname(path), literal));
+      for (const candidate of [target, ...[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".json", "/index.ts", "/index.tsx", "/index.js", "/index.jsx", "/index.mts", "/index.cts", "/index.mjs", "/index.cjs"].map(ext => target + ext)]) {
         if (original.has(candidate) && !protectedFiles.has(candidate)) queue.push(candidate);
       }
     }

@@ -25,7 +25,8 @@ function fixture() {
   writeFileSync(join(repo, ".secrets", "token"), "SENTINEL=hidden");
   writeFileSync(join(repo, "private.key"), "SENTINEL=hidden");
   writeFileSync(join(repo, "vitest.config.ts"), "export default { test: { setupFiles: ['./bootstrap.ts'] } };\n");
-  writeFileSync(join(repo, "bootstrap.ts"), "export {};\n");
+  writeFileSync(join(repo, "bootstrap.ts"), "import './config-helper';\nexport {};\n");
+  writeFileSync(join(repo, "config-helper.cts"), "export {};\n");
   const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
   git("init", "-q"); git("add", "."); git("-c", "user.name=Test", "-c", "user.email=test@local", "commit", "-qm", "baseline");
   writeFileSync(join(repo, "regression.test.ts"), "// supplied test\n");
@@ -43,6 +44,7 @@ describe("committed repository workspace", () => {
       expect(workspace.files).not.toContain(hidden);
     }
     expect(workspace.protectedPaths).toContain("bootstrap.ts");
+    expect(workspace.protectedPaths).toContain("config-helper.cts");
     expect(workspace.regressionHash).toMatch(/^[a-f0-9]{64}$/);
     expect(statSync(join(workspace.dir, "src", "tool.js")).mode & 0o111).toBe(0o111);
     workspace.cleanup();
@@ -95,6 +97,14 @@ describe("committed repository workspace", () => {
     const f = fixture();
     truncateSync(join(f.repo, "regression.test.ts"), 2_000_001);
     await expect(f.prepare()).rejects.toThrow("regression exceeds 2000000 byte limit");
+  });
+
+  test("rejects computed config imports whose support files cannot be frozen", async () => {
+    const f = fixture();
+    writeFileSync(join(f.repo, "vitest.config.ts"), "const name = 'setup'; import('./src/' + name); export default {};\n");
+    f.git("add", "vitest.config.ts");
+    f.git("-c", "user.name=Test", "-c", "user.email=test@local", "commit", "-qm", "dynamic config");
+    await expect(f.prepare()).rejects.toThrow("dynamic config dependency is unsupported");
   });
 });
 

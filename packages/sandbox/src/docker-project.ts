@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { parse as parseYaml } from "yaml";
 import { runCommand, type ExecOptions, type ExecResult } from "./exec.js";
 import { localProcessEnv, readBoundedRegularFile, type LocalWorkspace } from "./local-workspace.js";
 
@@ -43,6 +44,32 @@ export interface VitestEvidence { version: 1; files: Array<{ path: string; task:
 export const DEFAULT_NODE_IMAGE = "node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5";
 const MAX_METADATA_BYTES = 2_000_000;
 const EVIDENCE_MARKER = "__VOUCH_EVIDENCE_V1__";
+const MAX_SETUP_BYTES = 750_000_000;
+const MAX_SETUP_ENTRIES = 100_000;
+
+function exceedsDirectoryLimit(root: string, maxBytes: number, maxEntries: number): boolean {
+  const queue = [root];
+  let bytes = 0;
+  let entries = 0;
+  while (queue.length) {
+    const directory = queue.pop()!;
+    let children;
+    try { children = readdirSync(directory, { withFileTypes: true }); }
+    catch { continue; }
+    for (const child of children) {
+      entries++;
+      if (entries > maxEntries) return true;
+      const path = join(directory, child.name);
+      if (child.isDirectory() && !child.isSymbolicLink()) queue.push(path);
+      else {
+        try { bytes += lstatSync(path).size; }
+        catch { continue; }
+        if (bytes > maxBytes) return true;
+      }
+    }
+  }
+  return false;
+}
 
 function validateNpmLock(bytes: Buffer): void {
   const lock = JSON.parse(bytes.toString("utf8")) as {
@@ -72,14 +99,36 @@ function validateNpmLock(bytes: Buffer): void {
 
 function validatePnpmLock(bytes: Buffer): void {
   const lock = bytes.toString("utf8");
-  if (!/^lockfileVersion:\s*['"]?9\.0['"]?\s*$/m.test(lock)) throw new Error("pnpm MVP requires lockfileVersion 9.0");
   if (/(?:\b(?:tarball|directory):|\b(?:link|file):)/i.test(lock)) {
     throw new Error("linked, file, directory, and custom tarball dependencies are unsupported in the local MVP");
   }
-  for (const name of ["vitest", "vite"] as const) {
-    const escaped = name.replace("/", "\\/");
-    const entry = new RegExp(`^  ${escaped}@[3456789]\\.[^:\\n]+:\\n    resolution: \\{integrity: sha512-[A-Za-z0-9+/=]+\\}`, "m");
-    if (!entry.test(lock)) throw new Error(`pnpm lockfile must pin ${name} with sha512 integrity`);
+  const document = parseYaml(lock, { maxAliasCount: 0 }) as {
+    lockfileVersion?: string | number;
+    importers?: Record<string, { dependencies?: Record<string, { specifier?: unknown; version?: unknown }>; devDependencies?: Record<string, { specifier?: unknown; version?: unknown }> }>;
+    packages?: Record<string, { resolution?: { integrity?: unknown } }>;
+    snapshots?: Record<string, { dependencies?: Record<string, unknown> }>;
+  };
+  if (String(document.lockfileVersion) !== "9.0") throw new Error("pnpm MVP requires lockfileVersion 9.0");
+  const root = document.importers?.["."];
+  const vitest = root?.devDependencies?.vitest ?? root?.dependencies?.vitest;
+  if (!vitest || typeof vitest.specifier !== "string" || typeof vitest.version !== "string" || /^(?:npm:|workspace:|link:|file:)/i.test(vitest.specifier)) {
+    throw new Error("root pnpm importer must resolve the declared Vitest package directly");
+  }
+  const vitestVersion = vitest.version.split("(", 1)[0]!;
+  if (!/^[345]\./.test(vitestVersion)) throw new Error("root pnpm importer must pin Vitest 3, 4, or 5");
+  const vitestPackage = document.packages?.[`vitest@${vitestVersion}`] ?? document.packages?.[`/vitest@${vitestVersion}`];
+  if (!/^sha512-[A-Za-z0-9+/=]+$/.test(String(vitestPackage?.resolution?.integrity ?? ""))) {
+    throw new Error("pnpm lockfile must pin the root Vitest package with sha512 integrity");
+  }
+  const vitestSnapshot = document.snapshots?.[`vitest@${vitest.version}`] ?? document.snapshots?.[`/vitest@${vitest.version}`];
+  const viteResolution = vitestSnapshot?.dependencies?.vite;
+  if (typeof viteResolution !== "string" || /^(?:npm:|workspace:|link:|file:)/i.test(viteResolution)) {
+    throw new Error("root Vitest snapshot must resolve Vite directly");
+  }
+  const viteVersion = viteResolution.split("(", 1)[0]!;
+  const vitePackage = document.packages?.[`vite@${viteVersion}`] ?? document.packages?.[`/vite@${viteVersion}`];
+  if (!/^sha512-[A-Za-z0-9+/=]+$/.test(String(vitePackage?.resolution?.integrity ?? ""))) {
+    throw new Error("pnpm lockfile must pin Vitest's Vite package with sha512 integrity");
   }
 }
 
@@ -92,7 +141,8 @@ export default class VouchReporter {
 }
 `;
 
-const LAUNCHER = `import { createRequire } from 'node:module';
+const LAUNCHER = `import { closeSync, writeSync } from 'node:fs';
+import { createRequire } from 'node:module';
 const require = createRequire('/repo/package.json');
 const { startVitest } = await import(require.resolve('vitest/node'));
 const { configDefaults } = await import(require.resolve('vitest/config'));
@@ -101,7 +151,12 @@ const options = { root:'/repo',run:true,watch:false,cache:false,fsModuleCache:fa
 if(selection === 'regression') { options.include = [regression]; options.exclude = [...configDefaults.exclude]; }
 const ctx = await startVitest('test', selection === 'regression' ? [regression] : [], options, {cacheDir:'/tmp/vite-cache'});
 await ctx?.close();
-if (globalThis.__vouchEvidence) process.stdout.write('\\n${EVIDENCE_MARKER}' + Buffer.from(JSON.stringify(globalThis.__vouchEvidence)).toString('base64') + '\\n');
+const exitCode = process.exitCode ?? 0;
+process.removeAllListeners('beforeExit');
+process.removeAllListeners('exit');
+if (globalThis.__vouchEvidence) writeSync(1, '\\n${EVIDENCE_MARKER}' + Buffer.from(JSON.stringify(globalThis.__vouchEvidence)).toString('base64') + '\\n');
+closeSync(1);
+process.exit(exitCode);
 `;
 
 export function classifyVitestEvidence(evidence: unknown, execution: ExecResult, selection: TestSelection, regressionPath: string): StructuredTestResult {
@@ -238,14 +293,31 @@ export class DockerProjectRunner implements ProjectTestRunner {
       }
     }
     const packageCommand = pnpm ? ["corepack", `pnpm@${manifest.packageManager?.split("@")[1] ?? "10.33.3"}`, "install", "--frozen-lockfile", "--ignore-scripts", "--ignore-pnpmfile", "--store-dir=/tmp/pnpm-store"] : ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--cache=/tmp/npm-cache"];
-    const result = await this.execute(["--network=bridge", "--mount", `type=bind,src=${setup},dst=/repo`, "--workdir=/repo", "--env", "COREPACK_HOME=/tmp/corepack", this.image, ...packageCommand], { signal: opts.signal, timeoutMs: timeoutRemaining() });
+    const storageController = new AbortController();
+    let storageExceeded = false;
+    const checkStorage = () => {
+      if (storageExceeded || !exceedsDirectoryLimit(setup, MAX_SETUP_BYTES, MAX_SETUP_ENTRIES)) return;
+      storageExceeded = true;
+      storageController.abort();
+    };
+    const monitor = setInterval(checkStorage, 1_000);
+    monitor.unref();
+    let result: ExecResult;
+    try {
+      const setupSignal = opts.signal ? AbortSignal.any([opts.signal, storageController.signal]) : storageController.signal;
+      result = await this.execute(["--network=bridge", "--mount", `type=bind,src=${setup},dst=/repo`, "--workdir=/repo", "--env", "COREPACK_HOME=/tmp/corepack", this.image, ...packageCommand], { signal: setupSignal, timeoutMs: timeoutRemaining() });
+      checkStorage();
+    } finally {
+      clearInterval(monitor);
+    }
+    if (storageExceeded) throw new Error("dependency setup exceeded the 750 MB / 100000 entry limit");
     if (result.exitCode !== 0 || result.timedOut || result.cancelled) throw new Error(`dependency setup ${result.cancelled ? "cancelled" : result.timedOut ? "timed out" : "failed"}: ${result.stderr.slice(-4000)}`);
     if (!existsSync(join(setup, "node_modules", "vitest", "vitest.mjs"))) throw new Error("dependency setup did not install the declared Vitest runner");
-    const installed = JSON.parse(readBoundedRegularFile(join(setup, "node_modules", "vitest", "package.json"), MAX_METADATA_BYTES, "installed Vitest package.json").toString("utf8")) as { version?: string };
-    if (!/^[345]\./.test(installed.version ?? "")) throw new Error("MVP structured verification requires Vitest 3, 4, or 5 with Vite 6.1 or newer");
-    const vite = JSON.parse(readBoundedRegularFile(join(setup, "node_modules", "vite", "package.json"), MAX_METADATA_BYTES, "installed Vite package.json").toString("utf8")) as { version?: string };
+    const installed = JSON.parse(readBoundedRegularFile(join(setup, "node_modules", "vitest", "package.json"), MAX_METADATA_BYTES, "installed Vitest package.json").toString("utf8")) as { name?: string; version?: string };
+    if (installed.name !== "vitest" || !/^[345]\./.test(installed.version ?? "")) throw new Error("MVP structured verification requires the official Vitest 3, 4, or 5 package with Vite 6.1 or newer");
+    const vite = JSON.parse(readBoundedRegularFile(join(setup, "node_modules", "vite", "package.json"), MAX_METADATA_BYTES, "installed Vite package.json").toString("utf8")) as { name?: string; version?: string };
     const [viteMajor = 0, viteMinor = 0] = (vite.version ?? "").split(".").map(Number);
-    if (viteMajor < 6 || (viteMajor === 6 && viteMinor < 1)) throw new Error("MVP structured verification requires Vite 6.1 or newer");
+    if (vite.name !== "vite" || viteMajor < 6 || (viteMajor === 6 && viteMinor < 1)) throw new Error("MVP structured verification requires the official Vite 6.1 or newer package");
     this.runtimeData = {
       adapter: "vitest",
       image: this.image,

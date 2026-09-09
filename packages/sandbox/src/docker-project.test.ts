@@ -21,7 +21,7 @@ const npmLock = JSON.stringify({
     "node_modules/vite": { version: "8.0.0", resolved: "https://registry.npmjs.org/vite/-/vite-8.0.0.tgz", integrity: "sha512-BBBB" },
   },
 });
-const pnpmLock = "lockfileVersion: '9.0'\n\npackages:\n\n  vite@8.0.0:\n    resolution: {integrity: sha512-BBBB}\n\n  vitest@5.0.0:\n    resolution: {integrity: sha512-AAAA}\n";
+const pnpmLock = "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    devDependencies:\n      vitest:\n        specifier: 5.0.0\n        version: 5.0.0\n\npackages:\n\n  vite@8.0.0:\n    resolution: {integrity: sha512-BBBB}\n\n  vitest@5.0.0:\n    resolution: {integrity: sha512-AAAA}\n\nsnapshots:\n\n  vite@8.0.0: {}\n\n  vitest@5.0.0:\n    dependencies:\n      vite: 8.0.0\n";
 
 describe("structured Vitest evidence", () => {
   test("requires assertion evidence and an agreeing process exit", () => {
@@ -68,9 +68,9 @@ test("Docker project runner mounts only isolated data and disables networking fo
       const setup = mount.slice("type=bind,src=".length, -",dst=/repo".length);
       mkdirSync(join(setup, "node_modules", "vitest"), { recursive: true });
       writeFileSync(join(setup, "node_modules", "vitest", "vitest.mjs"), "");
-      writeFileSync(join(setup, "node_modules", "vitest", "package.json"), '{"version":"5.0.0"}');
+      writeFileSync(join(setup, "node_modules", "vitest", "package.json"), '{"name":"vitest","version":"5.0.0"}');
       mkdirSync(join(setup, "node_modules", "vite"), { recursive: true });
-      writeFileSync(join(setup, "node_modules", "vite", "package.json"), '{"version":"8.0.0"}');
+      writeFileSync(join(setup, "node_modules", "vite", "package.json"), '{"name":"vite","version":"8.0.0"}');
     }
     if (args.includes("/vouch/run.mjs")) return { ...success, stdout: `__VOUCH_EVIDENCE_V1__${Buffer.from(JSON.stringify(evidence("pass"))).toString("base64")}\n` };
     return success;
@@ -118,9 +118,9 @@ test("pnpm setup ignores repository pnpm hooks", async () => {
       const setup = mount.slice("type=bind,src=".length, -",dst=/repo".length);
       mkdirSync(join(setup, "node_modules", "vitest"), { recursive: true });
       writeFileSync(join(setup, "node_modules", "vitest", "vitest.mjs"), "");
-      writeFileSync(join(setup, "node_modules", "vitest", "package.json"), '{"version":"5.0.0"}');
+      writeFileSync(join(setup, "node_modules", "vitest", "package.json"), '{"name":"vitest","version":"5.0.0"}');
       mkdirSync(join(setup, "node_modules", "vite"), { recursive: true });
-      writeFileSync(join(setup, "node_modules", "vite", "package.json"), '{"version":"8.0.0"}');
+      writeFileSync(join(setup, "node_modules", "vite", "package.json"), '{"name":"vite","version":"8.0.0"}');
     }
     return success;
   } });
@@ -128,4 +128,14 @@ test("pnpm setup ignores repository pnpm hooks", async () => {
   expect(installArgs).toContain("--ignore-pnpmfile");
   expect(installArgs).toContain("--ignore-scripts");
   await runner.cleanup();
+});
+
+test("pnpm setup binds runner provenance to the root importer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "vouch-docker-pnpm-alias-")); roots.push(root);
+  const baselineDir = join(root, "baseline"); mkdirSync(baselineDir);
+  writeFileSync(join(baselineDir, "package.json"), '{"packageManager":"pnpm@10.33.3","devDependencies":{"vitest":"npm:attacker-package@5.0.0"}}');
+  writeFileSync(join(baselineDir, "pnpm-lock.yaml"), pnpmLock.replace("specifier: 5.0.0", "specifier: npm:attacker-package@5.0.0"));
+  const workspace: LocalWorkspace = { dir: join(root, "candidate"), baselineDir, verificationDir: join(root, "verification"), commit: "0".repeat(40), files: [], protectedPaths: [], regressionPath: "regression.test.ts", regressionHash: "x", cleanup() {} };
+  const runner = new DockerProjectRunner({ invoke: async () => success });
+  await expect(runner.prepare(workspace)).rejects.toThrow("root pnpm importer");
 });

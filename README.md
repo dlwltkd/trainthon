@@ -74,7 +74,8 @@ test outside those paths is rejected during setup.
 
 The dependency-install container has network access during preparation. Install
 scripts, pnpm hooks, linked/file/custom-tarball dependencies, and non-npmjs URLs
-in npm locks are rejected. Test containers have no network, return structured
+in npm locks are rejected; dependency extraction is monitored at 750 MB and
+100,000 entries. Test containers have no network, return structured
 evidence through a bounded output channel, and use a read-only repository mount. Each record includes the
 pinned container digest, package-manager and Vitest/Vite versions, lockfile hash,
 resolved input hash, and before/after test manifests.

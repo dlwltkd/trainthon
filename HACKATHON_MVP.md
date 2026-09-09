@@ -171,7 +171,8 @@ changes; and persists the patch, structured before/after test evidence, run reco
 and correlated event log before cleanup. Records bind the run to the commit,
 regression, lockfile, pinned image, runner versions, and exact test inventories.
 Dependency preparation rejects install scripts and local/custom package sources;
-tests run offline with bounded structured output. It does not load a benchmark task
+dependency extraction has a size/entry monitor, and tests run offline with bounded
+structured output. It does not load a benchmark task
 or hidden grader.
 
 This local slice assumes the repository owner trusts the selected commit,
