@@ -156,6 +156,33 @@ export interface GuidanceEvent extends BaseEvent {
   agentRole: AgentRole;
 }
 
+export interface SkillCallEvent extends BaseEvent {
+  type: "skill_call";
+  skillId: string;
+  version: string;
+  reason: string;
+  callId: string;
+  agentRole: AgentRole;
+  stage: EngineState;
+}
+
+export interface AgentPlanStep {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
+export interface AgentUpdateEvent extends BaseEvent {
+  type: "agent_update";
+  summary: string;
+  nextAction: string;
+  evidence: string[];
+  plan: AgentPlanStep[];
+  callId: string;
+  agentRole: AgentRole;
+  stage: EngineState;
+}
+
 export interface RepositoryEvent extends BaseEvent {
   type: "repository_snapshot";
   name: string;
@@ -251,6 +278,8 @@ export type HarnessEvent =
   | ActionSummaryEvent
   | AgentSummaryEvent
   | GuidanceEvent
+  | SkillCallEvent
+  | AgentUpdateEvent
   | RepositoryEvent
   | FileChangeEvent
   | TestRunEvent

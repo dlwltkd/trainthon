@@ -22,6 +22,8 @@ function actionSummary(name: string, args: unknown): string {
     case "run_functional_tests":
     case "run_tests": return "Running functional tests";
     case "apply_supplied_patch": return "Applying the supplied source patch";
+    case "use_skill": return "Loading selected skill instructions";
+    case "report_progress": return "Publishing a decision summary and plan";
     default: return `Running ${name}`;
   }
 }
@@ -69,7 +71,7 @@ export async function executeLoggedTool(
   try {
     const result = await withCancellation(Promise.resolve().then(() => {
       budget.assertActive();
-      return tool.execute(args);
+      return tool.execute(args, { callId });
     }), budget.signal);
     budget.assertActive();
     const serialized = typeof result === "string" ? result : JSON.stringify(result) ?? "null";

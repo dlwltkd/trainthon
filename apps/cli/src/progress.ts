@@ -74,6 +74,18 @@ export function createRunProgress(
       case "guidance_configured":
         print(`${role}guidance: ${label(event.id)}@${label(event.version)}`);
         break;
+      case "skill_call":
+        print(`${role}skill: ${label(event.skillId)}@${label(event.version)}`);
+        print(`${role}skill reason: ${label(event.reason)}`);
+        activity = `${role}using ${label(event.skillId)}`;
+        break;
+      case "agent_update":
+        print(`${role}decision: ${label(event.summary)}`);
+        if (event.evidence.length) print(`${role}evidence: ${event.evidence.map(label).join(", ")}`);
+        for (const step of event.plan) print(`${role}plan [${step.status}]: ${label(step.title)}`);
+        print(`${role}next: ${label(event.nextAction)}`);
+        activity = `${role}${label(event.nextAction)}`;
+        break;
       case "tool_call":
         if (event.callId) tools.set(event.callId, Date.now());
         activity = `${role}tool ${label(event.name)}`;

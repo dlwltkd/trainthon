@@ -198,7 +198,15 @@ function clip(value: string, limit = MAX_PROMPT_INPUT): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) {
+    if (error.message.trim()) return error.message;
+    const status = (error as Error & { statusCode?: unknown }).statusCode;
+    const httpStatus = typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599
+      ? ` (HTTP ${status})` : "";
+    return `${error.name.trim() || "Error"}${httpStatus}: no error message was provided`;
+  }
+  const message = error === null || error === undefined ? "" : String(error);
+  return message.trim() ? message : "Unknown error: no error message was provided";
 }
 
 function patchForFile(patch: string, path: string): string {
@@ -494,6 +502,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
       regressionHash: workspace.regressionHash,
       inputHash,
       files: workspace.files,
+      sourcePath: resolve(options.repoPath),
     };
     writeJson(artifacts.repository, repository);
     writePrivate(artifacts.regression, readFileSync(join(workspace.baselineDir, workspace.regressionPath)));
@@ -569,7 +578,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
             reviewed = await reviewer.run({
               system: systemPromptLocalReview(),
               prompt: buildLocalReviewPrompt(promptContext),
-              tools: buildLocalReviewTools(workspace, budget.signal),
+              tools: buildLocalReviewTools(workspace, budget.signal, event => logger.emit(event)),
               budgets: options.budgets,
               budget,
               role: "red",
@@ -584,7 +593,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
           }
           promptContext.review = clip(reviewed.finalText, 20_000);
           writePrivate(artifacts.reviewSummary, reviewed.finalText);
-          logger.emit({ type: "action_summary", summary: "Read-only evidence review completed", agentRole: "red", stage: "REPRODUCE" });
+          logger.emit({ type: "agent_summary", summary: clip(reviewed.finalText.trim() || "Read-only evidence review completed", 1_000), agentRole: "red", stage: "REPRODUCE" });
         }
 
         transition("PATCH");
@@ -619,6 +628,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
             signal: budget.signal,
             remainingTimeoutMs: () => remaining(),
             onTestResult: (selection, result, durationMs) => storeTest(`agent-${selection}-${++toolRun}`, result, durationMs),
+            onEvent: event => logger.emit(event),
           });
           tools = toolset.tools;
           drainRepairTools = () => toolset.drain();

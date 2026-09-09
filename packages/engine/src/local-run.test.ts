@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { ScriptedRunner, type AgentRunner } from "@vouch/model";
+import { ScriptedRunner, type AgentRunner, type Script } from "@vouch/model";
 import type { HarnessEvent } from "@vouch/protocol";
 import type {
   LocalWorkspace,
@@ -14,6 +14,19 @@ import type {
 import { executeLocalRun as runLocal, type ExecuteLocalRunOptions } from "./local-run.js";
 
 const roots: string[] = [];
+
+function tracedRunner(script: Script): ScriptedRunner {
+  return new ScriptedRunner(async tools => {
+    await tools["use_skill"]!({ skillId: "minimal-repair", reason: "Apply the change required by the supplied assertion." });
+    await tools["report_progress"]!({
+      summary: "The supplied assertion identifies behavior to correct.",
+      nextAction: "Inspect and update the application source.",
+      evidence: ["tests/security.test.ts"],
+      plan: [{ id: "repair", title: "Apply and check the source change", status: "in_progress" }],
+    });
+    return script(tools);
+  });
+}
 
 async function executeLocalRun(options: ExecuteLocalRunOptions) {
   const record = await runLocal(options);
@@ -185,7 +198,7 @@ describe("executeLocalRun", () => {
   it("reports repository tests passed without claiming independent security verification", async () => {
     const input = fixture();
     const runner = new SourceAwareRunner();
-    const repairRunner = new ScriptedRunner(async (tools) => {
+    const repairRunner = tracedRunner(async (tools) => {
       await tools["write_file"]?.({
         path: "src/value.ts",
         content: "export function clean(value: string) { return value.replace(/</g, ''); }\n",
@@ -212,6 +225,10 @@ describe("executeLocalRun", () => {
     const events = readFileSync(record.artifacts.events, "utf8").trim().split("\n").map(line => JSON.parse(line));
     const call = events.find(event => event.type === "tool_call" && event.name === "write_file");
     const completed = events.find(event => event.type === "tool_result" && event.callId === call?.callId);
+    const selected = events.find(event => event.type === "skill_call");
+    expect(selected).toMatchObject({ skillId: "minimal-repair", agentRole: "blue", version: "1.0.0" });
+    expect(events.find(event => event.type === "tool_call" && event.callId === selected.callId)?.name).toBe("use_skill");
+    expect(events.find(event => event.type === "agent_update")).toMatchObject({ evidence: ["tests/security.test.ts"], nextAction: "Inspect and update the application source." });
     expect(call?.agentRole).toBe("blue");
     expect(call?.args.content).toMatch(/^\[omitted \d+ bytes\]$/);
     expect(call?.args.contentSha256).toMatch(/^[a-f0-9]{64}$/);
@@ -343,7 +360,7 @@ describe("executeLocalRun", () => {
         throw new Error("container removal failed");
       }
     }
-    const repairRunner = new ScriptedRunner(async (tools) => {
+    const repairRunner = tracedRunner(async (tools) => {
       await tools["write_file"]?.({
         path: "src/value.ts",
         content: "export function clean(value: string) { return value.replace(/</g, ''); }\n",
@@ -359,7 +376,7 @@ describe("executeLocalRun", () => {
 
   it("retains source changes when a later protected write fails", async () => {
     const input = fixture();
-    const repairRunner = new ScriptedRunner(async (tools) => {
+    const repairRunner = tracedRunner(async (tools) => {
       await tools["write_file"]?.({
         path: "src/value.ts",
         content: "export function clean(value: string) { return value.replace(/</g, ''); }\n",
@@ -377,7 +394,7 @@ describe("executeLocalRun", () => {
 
   it("rejects a passing verification when the functional test inventory changes", async () => {
     const input = fixture();
-    const repairRunner = new ScriptedRunner(async (tools) => {
+    const repairRunner = tracedRunner(async (tools) => {
       await tools["write_file"]?.({
         path: "src/value.ts",
         content: "export function clean(value: string) { return value.replace(/</g, ''); }\n",
@@ -421,10 +438,44 @@ describe("executeLocalRun", () => {
     expect(record.costUsd).toBe(15);
   });
 
+  it.each([
+    { thrown: new Error(""), expected: "Error: no error message was provided" },
+    {
+      thrown: Object.assign(new Error(" \n "), {
+        name: "AI_APICallError", statusCode: 503, requestBodyValues: { private: "must not be logged" },
+      }),
+      expected: "AI_APICallError (HTTP 503): no error message was provided",
+    },
+    { thrown: "", expected: "Unknown error: no error message was provided" },
+  ])("persists a usable reason when a review provider throws an empty message ($expected)", async ({ thrown, expected }) => {
+    const input = fixture();
+    const runner = new SourceAwareRunner();
+    let repairInvoked = false;
+    const record = await executeLocalRun({
+      ...options(input, runner),
+      reviewModel: { provider: "compatible", model: "review-test" },
+      reviewRunner: {
+        async run(runInput) {
+          runInput.budget!.consumeStep(10, 5);
+          throw thrown;
+        },
+      },
+      repairRunner: { async run() { repairInvoked = true; throw new Error("unexpected repair"); } },
+    });
+
+    expect(record.status).toBe("INFRA_ERROR");
+    expect(record.reason).toBe(expected);
+    expect(record.modelUsage.review).toMatchObject({ invoked: true, inputTokens: 10, outputTokens: 5 });
+    expect(record.modelUsage.repair.invoked).toBe(false);
+    expect(repairInvoked).toBe(false);
+    expect(runner.cleaned).toBe(true);
+    expect(readFileSync(record.artifacts.record, "utf8")).not.toContain("must not be logged");
+  });
+
   it("drains an in-flight test before run_end after cancellation", async () => {
     const input = fixture();
     const controller = new AbortController();
-    const repairRunner = new ScriptedRunner(async (tools) => {
+    const repairRunner = tracedRunner(async (tools) => {
       setTimeout(() => controller.abort(), 5);
       await tools["run_regression"]?.({});
       return "unexpected";

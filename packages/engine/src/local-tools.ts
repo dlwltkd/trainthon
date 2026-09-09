@@ -1,5 +1,7 @@
 import { z, type ZodType } from "zod";
+import type { EventInput } from "@vouch/protocol";
 import type { AgentTool } from "@vouch/model";
+import { createAgentTrace, type AgentTrace } from "./agent-trace.js";
 import {
   listDirTool,
   readFileTool,
@@ -16,6 +18,7 @@ interface LocalToolOptions {
   signal: AbortSignal;
   remainingTimeoutMs: () => number;
   onTestResult: (selection: TestSelection, result: StructuredTestResult, durationMs: number) => string | undefined;
+  onEvent: (event: EventInput) => void;
 }
 
 function defineTool<S extends ZodType>(
@@ -68,6 +71,7 @@ function readTools(
   workspace: LocalWorkspace,
   signal: AbortSignal,
   queue: SerialToolQueue,
+  trace: AgentTrace,
 ): AgentTool[] {
   return [
     defineTool(
@@ -76,7 +80,10 @@ function readTools(
       z.object({ path: z.string().min(1).max(500) }),
       ({ path }) => queue.run(() => {
         signal.throwIfAborted();
-        return { content: readFileTool(workspace.dir, path) };
+        trace.requireReady();
+        const content = readFileTool(workspace.dir, path);
+        trace.observe([path]);
+        return { content };
       }),
     ),
     defineTool(
@@ -85,6 +92,7 @@ function readTools(
       z.object({ path: z.string().min(1).max(500).optional() }),
       ({ path }) => queue.run(() => {
         signal.throwIfAborted();
+        trace.requireReady();
         return { entries: listDirTool(workspace.dir, path ?? ".") };
       }),
     ),
@@ -94,14 +102,19 @@ function readTools(
       z.object({ pattern: z.string().min(1).max(500) }),
       ({ pattern }) => queue.run(() => {
         signal.throwIfAborted();
-        return { hits: literalSearch(workspace, pattern) };
+        trace.requireReady();
+        const hits = literalSearch(workspace, pattern);
+        trace.observe(hits.map(hit => hit.file));
+        return { hits };
       }),
     ),
   ];
 }
 
-export function buildLocalReviewTools(workspace: LocalWorkspace, signal: AbortSignal): AgentTool[] {
-  return readTools(workspace, signal, new SerialToolQueue());
+export function buildLocalReviewTools(workspace: LocalWorkspace, signal: AbortSignal, onEvent: (event: EventInput) => void): AgentTool[] {
+  const queue = new SerialToolQueue();
+  const trace = createAgentTrace({ workspace, signal, onEvent, role: "red", enqueue: operation => queue.run(operation) });
+  return [...trace.tools, ...readTools(workspace, signal, queue, trace)];
 }
 
 export interface LocalRepairToolset {
@@ -111,7 +124,8 @@ export interface LocalRepairToolset {
 
 export function buildLocalRepairTools(options: LocalToolOptions): LocalRepairToolset {
   const queue = new SerialToolQueue();
-  const tools = readTools(options.workspace, options.signal, queue);
+  const trace = createAgentTrace({ ...options, role: "blue", enqueue: operation => queue.run(operation) });
+  const tools = [...trace.tools, ...readTools(options.workspace, options.signal, queue, trace)];
   tools.push(
     defineTool(
       "write_file",
@@ -119,7 +133,9 @@ export function buildLocalRepairTools(options: LocalToolOptions): LocalRepairToo
       z.object({ path: z.string().min(1).max(500), content: z.string().max(2_000_000) }),
       ({ path, content }) => queue.run(() => {
         options.signal.throwIfAborted();
+        trace.requireReady();
         writeLocalSource(options.workspace, path, content);
+        trace.observe([path], true);
         return { ok: true, path };
       }),
     ),
@@ -130,6 +146,7 @@ export function buildLocalRepairTools(options: LocalToolOptions): LocalRepairToo
   ] as const) {
     tools.push(defineTool(name, description, z.object({}), () => queue.run(async () => {
       options.signal.throwIfAborted();
+      trace.requireReady();
       const startedAt = performance.now();
       const result = await options.runner.runTests(options.workspace.dir, selection, {
         signal: options.signal,

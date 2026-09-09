@@ -7,7 +7,7 @@ export interface AgentTool<A = unknown, R = unknown> {
   name: string;
   description: string;
   schema: ZodType<A>;
-  execute: (args: A) => Promise<R>;
+  execute: (args: A, context?: { callId: string }) => Promise<R>;
 }
 
 export interface AgentRunInput {

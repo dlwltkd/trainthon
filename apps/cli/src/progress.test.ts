@@ -23,6 +23,22 @@ afterEach(() => {
 });
 
 describe("run progress", () => {
+  it("shows published skill reasons, public decision summaries and plans", () => {
+    const write = vi.fn();
+    const progress = createRunProgress("/tmp/runs", write);
+    progress.onEvent(start());
+    progress.onEvent(event({ type: "skill_call", skillId: "evidence-review", version: "1.0.0", reason: "Inspect the behavior covered by the supplied assertion.", callId: "skill-1", agentRole: "red", stage: "REPRODUCE" }));
+    progress.onEvent(event({ type: "agent_update", summary: "The reported behavior is covered by the existing test.", nextAction: "Read the application source.", evidence: ["tests/test_app.py"], plan: [{ id: "inspect", title: "Inspect source", status: "in_progress" }], callId: "update-1", agentRole: "red", stage: "REPRODUCE" }));
+    const output = write.mock.calls.flat().join("");
+    expect(output).toContain("red skill: evidence-review@1.0.0");
+    expect(output).toContain("red skill reason: Inspect the behavior covered by the supplied assertion.");
+    expect(output).toContain("red decision: The reported behavior is covered by the existing test.");
+    expect(output).toContain("red evidence: tests/test_app.py");
+    expect(output).toContain("red plan [in_progress]: Inspect source");
+    expect(output).toContain("red next: Read the application source.");
+    progress.stop();
+  });
+
   it("shows persisted progress immediately, then describes a quiet operation without inventing progress", () => {
     const write = vi.fn();
     const progress = createRunProgress("/tmp/runs", write);
