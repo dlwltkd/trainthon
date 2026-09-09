@@ -92,24 +92,27 @@ Red가 예산 내 트리거 못 만들면 → NOT_REPRODUCIBLE, 변경 0줄. 대
 - 타겟: 실제 npm CVE 2개(작은 패키지 + 테스트 + 단순 CWE + MIT), fork 후 취약 커밋 pin. 벤치 eval과 공유.
 - 라이브 = 벤치 V 과제 하나를 hint=L1(위치 안 줌)로 조건 C 실행 → localization 화면 노출.
 - 흐름: Red 익스플로잇(빨강) → Blue 패치 → Verify → 내 fork에 draft PR(증거 표).
-- 무대 대비: 실제-CVE는 성공 저널 녹화 후 replay, 통제 앱은 라이브.
+- 무대 대비: 실제-CVE는 성공 저널 녹화 후 replay, 최소 fixture 과제는 라이브(빠르고 결정론적).
 - 윤리: fork 코드만 sandbox에서, PR도 fork에만, 운영 시스템·무단 리포트 없음.
 
-## 심사 앱 (통제 원본)
+## 타겟 코드 (전용 데모 앱 없음)
 
-Hono API. users(role: judge|participant), submissions, scores.
-- V: PATCH /submissions/:id/score에 역할 검사 누락 → participant가 자기 점수 조작.
-- exploit(): participant 토큰으로 자기 점수 PATCH → 403 기대인데 200.
-- functional(): judge 채점 가능, participant 조회 가능.
-- 대조 C1: 이미 역할 검사 있음 + 오탐 리포트 → 정답 변경 0.
-- 대조 C2: "SQL injection" 리포트인데 실제 파라미터 바인딩됨 → 정답 변경 0.
+harness는 임의의 코드에 동작한다. 별도 심사 앱을 만들지 않는다. 각 과제는 `bench/tasks/<id>/repo/`에
+타겟 코드 사본을 두고, sandbox가 그 사본을 워크트리로 복제해 테스트를 돌린다. 서버 기동 불필요 —
+함수/모듈 수준 단위 테스트로 검증 가능한 CWE를 택한다(prototype pollution, path traversal, ReDoS,
+injection 등).
+
+- dev 과제: 최소 합성 fixture(함수 + 테스트). 엔진 루프 브링업·튜닝용.
+- eval 과제: 실제 npm CVE(작은 패키지 + 테스트 + 단순 CWE + MIT)를 취약 커밋으로 pin.
+- 대조 과제: 이미 수정된 버전 + 오탐 리포트(C1), 적용 안 되는 리포트(C2). 정답 = 변경 0줄.
+- 증명은 데모 연출이 아니라 벤치마크 숫자로 한다.
 
 ## 마일스톤 (완료 = 수용 기준)
 
 | M | 시간 | 완료 기준 |
 | --- | --- | --- |
 | M0 | 0–1h | 모노레포+protocol+이벤트 로거+CLI. `cli run --task hello --condition B`가 올바른 JSONL run 기록 생성 |
-| M1 | 1–3h | sandbox worktree + 도구 + 모델 루프(B). 기본 에이전트가 심사앱 점수버그 수정, grader가 FIXED_VERIFIED |
+| M1 | 1–3h | sandbox worktree + 도구 + 모델 루프(B). 기본 에이전트가 취약 fixture 수정, grader가 FIXED_VERIFIED |
 | M2 | 3–5h | harness(C) + Red/Blue + 게이트. C가 V 하나 수정 AND 대조 하나 정답(diff=0). = P0 완료 |
 | M3 | 5–7h | SSE + Run 뷰 + replay |
 | M4 | 7–9h | bench 러너 + dev 4개 + 지표. `cli bench --set dev` 지표 표 |

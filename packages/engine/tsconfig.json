@@ -4,7 +4,11 @@
     "rootDir": "src",
     "outDir": "dist",
     "paths": {
-      "@vouch/protocol": ["../protocol/src/index.ts"]
+      "@vouch/protocol": ["../protocol/src/index.ts"],
+      "@vouch/sandbox": ["../sandbox/src/index.ts"],
+      "@vouch/grader": ["../grader/src/index.ts"],
+      "@vouch/model": ["../model/src/index.ts"],
+      "@vouch/skills": ["../skills/src/index.ts"]
     },
     "baseUrl": "."
   },

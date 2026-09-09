@@ -8,6 +8,7 @@ import type { RunConfig } from "@vouch/protocol";
 export function configHash(config: RunConfig, taskId: string): string {
   const canonical = JSON.stringify({
     model: config.model,
+    provider: config.provider ?? null,
     seed: config.seed,
     budgets: config.budgets,
     condition: config.condition,

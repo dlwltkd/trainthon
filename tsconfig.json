@@ -5,7 +5,11 @@
     "noEmit": true,
     "paths": {
       "@vouch/protocol": ["packages/protocol/src/index.ts"],
-      "@vouch/engine": ["packages/engine/src/index.ts"]
+      "@vouch/engine": ["packages/engine/src/index.ts"],
+      "@vouch/sandbox": ["packages/sandbox/src/index.ts"],
+      "@vouch/grader": ["packages/grader/src/index.ts"],
+      "@vouch/model": ["packages/model/src/index.ts"],
+      "@vouch/skills": ["packages/skills/src/index.ts"]
     }
   },
   "include": [

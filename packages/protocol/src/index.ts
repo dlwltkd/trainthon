@@ -30,6 +30,8 @@ export interface Task {
   report: TaskReport;
   /** Public functional tests visible to the agent (subset). */
   publicTests: string[];
+  /** Command the agent's run_tests tool executes (public/functional tests). */
+  testCmd?: string;
   split: Split;
 }
 
@@ -153,6 +155,8 @@ export type EventInput = DistributiveOmit<HarnessEvent, "runId" | "seq" | "ts">;
 
 export interface RunConfig {
   model: string;
+  /** Model provider; inferred from the model id when omitted. */
+  provider?: string;
   seed: number;
   budgets: Budgets;
   condition: Condition;

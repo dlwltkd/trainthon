@@ -26,21 +26,33 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
   }
   const seed = Number(getString(flags, "seed") ?? "1");
   const model = getString(flags, "model") ?? DEFAULT_MODEL;
+  const provider = getString(flags, "provider");
 
   const task = loadTask(BENCH_DIR, taskId);
   const config: RunConfig = {
     model,
+    provider,
     seed,
     budgets: DEFAULT_BUDGETS,
     condition: conditionRaw,
     graderVersion: GRADER_VERSION,
   };
 
-  const record = await executeRun({ task, config, runsDir: RUNS_DIR });
+  const record = await executeRun({
+    task,
+    config,
+    runsDir: RUNS_DIR,
+    repoRoot: REPO_ROOT,
+    benchDir: BENCH_DIR,
+  });
+  const m = record.metrics;
   process.stdout.write(
     `run ${record.runId}\n` +
       `  task=${record.taskId} condition=${record.condition} status=${record.status}\n` +
-      `  configHash=${record.configHash} elapsedMs=${record.elapsedMs}\n` +
+      `  configHash=${record.configHash} elapsedMs=${record.elapsedMs} costUsd=${record.costUsd.toFixed(4)}\n` +
+      (m
+        ? `  metrics: exploitNeutralized=${m.exploitNeutralized} functionalPass=${m.functionalPass} diffLines=${m.diffLineCount} guarded=${m.guardedFilesTouched}\n`
+        : "") +
       `  log=runs/${record.runId}.jsonl (${record.events.length} events)\n`,
   );
 }
@@ -53,7 +65,7 @@ async function main(): Promise<void> {
       break;
     default:
       process.stderr.write(
-        "usage: vouch run --task <id> --condition <A|B|C> [--seed N] [--model M]\n",
+        "usage: vouch run --task <id> --condition <A|B|C> [--seed N] [--model M] [--provider anthropic|openai]\n",
       );
       process.exit(command ? 1 : 0);
   }

@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@vouch/protocol": ["../protocol/src/index.ts"],
+      "@vouch/sandbox": ["../sandbox/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}
