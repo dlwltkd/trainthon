@@ -32,13 +32,40 @@ Three layers, three packages, so the benchmark can toggle them cleanly:
 The same execution engine powers both the product (Studio) and the benchmark (Bench).
 
 See [`HARNESS_PLAN.md`](./HARNESS_PLAN.md) for the full build spec, benchmark protocol, and milestones.
+See [`HACKATHON_MVP.md`](./HACKATHON_MVP.md) for the proposed hackathon scope,
+QR audience checks on participants' existing GitHub projects, Routeway Red
+configuration, and benchmark comparison plan.
 
 ## Dev
 
 ```bash
 pnpm install
 pnpm typecheck
-pnpm cli run --task hello --condition B   # writes runs/<runId>.jsonl
+pnpm test
+pnpm cli run --task proto-pollution --condition C --mode scripted
 ```
 
-Requires Node 22+ and pnpm.
+The repository MVP accepts a local Git repository, a report, and a designated
+Vitest regression. Scripted mode is useful for a deterministic rehearsal:
+
+```bash
+pnpm cli run \
+  --repo /path/to/project \
+  --report ./report.md \
+  --regression tests/security.test.ts \
+  --mode scripted \
+  --patch ./candidate.diff
+```
+
+Use `--mode live` with an explicit model/provider and its API key to let the
+repair agent edit source. The optional `VOUCH_RED_*` Routeway settings enable a
+read-only GLM evidence review before Blue repairs the code.
+
+Local runs snapshot the requested commit, overlay the supplied regression,
+install the project's locked dependencies in Docker, and run tests without
+network access. Only JS/TS application source can change. A verified result
+requires the exact regression and the functional suite to pass in a fresh copy.
+Artifacts are written below `runs/<runId>/` before cleanup.
+
+This slice supports Node projects with one npm or pnpm lockfile, Vitest 3–5,
+and Vite 6.1 or newer. It requires Node 22+, pnpm, Git, and Docker.

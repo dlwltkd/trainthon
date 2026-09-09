@@ -5,6 +5,7 @@ export interface ExecResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  cancelled?: boolean;
 }
 
 export interface ExecOptions {
@@ -12,11 +13,14 @@ export interface ExecOptions {
   timeoutMs: number;
   /** Extra entries prepended to PATH (e.g. the monorepo's node_modules/.bin). */
   extraPath?: string;
+  signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
+  maxOutputBytes?: number;
 }
 
-function withEnv(extraPath?: string): NodeJS.ProcessEnv {
-  if (!extraPath) return { ...process.env };
-  return { ...process.env, PATH: `${extraPath}:${process.env.PATH ?? ""}` };
+function withEnv(extraPath?: string, env?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const base = env ?? process.env;
+  return { ...base, ...(extraPath ? { PATH: `${extraPath}:${base.PATH ?? ""}` } : {}) };
 }
 
 export function runCommand(
@@ -25,27 +29,45 @@ export function runCommand(
   opts: ExecOptions,
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: withEnv(opts.extraPath) });
+    if (opts.signal?.aborted) {
+      resolve({ exitCode: -1, stdout: "", stderr: "cancelled", timedOut: false, cancelled: true });
+      return;
+    }
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: withEnv(opts.extraPath, opts.env), detached: process.platform !== "win32" });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
+    const limit = opts.maxOutputBytes ?? 1_000_000;
+    const tail = (old: string, chunk: Buffer) => (old + chunk.toString()).slice(-limit);
+    const kill = () => {
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+        else child.kill("SIGKILL");
+      } catch { /* Process already exited. */ }
+    };
+    const abort = () => { cancelled = true; kill(); };
+    opts.signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      kill();
     }, opts.timeoutMs);
     child.stdout.on("data", (d) => {
-      stdout += d.toString();
+      stdout = tail(stdout, d);
     });
     child.stderr.on("data", (d) => {
-      stderr += d.toString();
+      stderr = tail(stderr, d);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ exitCode: code ?? -1, stdout, stderr, timedOut });
+      opts.signal?.removeEventListener("abort", abort);
+      kill();
+      resolve({ exitCode: code ?? -1, stdout, stderr, timedOut, cancelled });
     });
     child.on("error", (err) => {
       clearTimeout(timer);
-      resolve({ exitCode: -1, stdout, stderr: stderr + String(err), timedOut });
+      opts.signal?.removeEventListener("abort", abort);
+      resolve({ exitCode: -1, stdout, stderr: stderr + String(err), timedOut, cancelled });
     });
   });
 }

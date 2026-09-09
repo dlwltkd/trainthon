@@ -6,6 +6,7 @@
   "packageManager": "pnpm@10.33.3",
   "scripts": {
     "cli": "tsx apps/cli/src/index.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

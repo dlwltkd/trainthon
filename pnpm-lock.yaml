@@ -26,6 +26,9 @@ importers:
       '@vouch/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@vouch/model':
+        specifier: workspace:*
+        version: link:../../packages/model
       '@vouch/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

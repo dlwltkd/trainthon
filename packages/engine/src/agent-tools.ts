@@ -1,4 +1,5 @@
 import { z, type ZodType } from "zod";
+import { posix } from "node:path";
 import type { AgentTool } from "@vouch/model";
 import {
   grepTool,
@@ -13,6 +14,17 @@ export interface ToolContext {
   testCmd: string;
   timeoutMs: number;
   extraPath?: string;
+  signal?: AbortSignal;
+  protectedPaths?: string[];
+  remainingTimeoutMs?: () => number;
+}
+
+export function isProtectedPath(path: string, protectedPaths: string[] = []): boolean {
+  const normalized = posix.normalize(path.replaceAll("\\", "/"));
+  return protectedPaths.includes(normalized) ||
+    normalized.split("/").some((part) => [".git", "node_modules", "test", "tests", "__tests__"].includes(part)) ||
+    /(?:^|\/)(?:package(?:-lock)?\.json|pnpm-lock\.yaml|npm-shrinkwrap\.json|yarn\.lock|[^/]*config\.[^/]+)$/.test(normalized) ||
+    /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(normalized);
 }
 
 /** Localizes the unknown-cast so tool executes can use typed args. */
@@ -56,6 +68,10 @@ export function buildTools(ctx: ToolContext): AgentTool[] {
       "Overwrite (or create) a file with new contents. Args: { path, content }.",
       z.object({ path: z.string(), content: z.string() }),
       async ({ path, content }) => {
+        ctx.signal?.throwIfAborted();
+        if (isProtectedPath(path, ctx.protectedPaths)) {
+          throw new Error(`source-only repair cannot modify protected file: ${path}`);
+        }
         writeFileTool(ctx.worktreeDir, path, content);
         return { ok: true };
       },
@@ -66,8 +82,9 @@ export function buildTools(ctx: ToolContext): AgentTool[] {
       z.object({}),
       async () => {
         const r = await runTestCommand(ctx.worktreeDir, ctx.testCmd, {
-          timeoutMs: ctx.timeoutMs,
+          timeoutMs: ctx.remainingTimeoutMs?.() ?? ctx.timeoutMs,
           extraPath: ctx.extraPath,
+          signal: ctx.signal,
         });
         return { passed: r.passed, output: r.output };
       },

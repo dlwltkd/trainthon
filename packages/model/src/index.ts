@@ -16,6 +16,8 @@ export {
   createCompatibleRunner,
   createRunner,
   createRunnerForSpec,
+  requireRunnerForSpec,
+  validateModelSpec,
   providerForModel,
   resolveRunnerFromEnv,
 } from "./providers.js";
@@ -26,5 +28,6 @@ export type {
   ResolvedRunner,
   ModelSpec,
 } from "./providers.js";
-export { computeCost, DEFAULT_PRICING } from "./pricing.js";
+export { computeCost, estimateCost, DEFAULT_PRICING } from "./pricing.js";
 export type { Pricing } from "./pricing.js";
+export { RunBudget, BudgetExceededError, RunCancelledError } from "./budget.js";

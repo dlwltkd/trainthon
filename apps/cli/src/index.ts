@@ -1,77 +1,105 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import type { Condition, RunConfig } from "@vouch/protocol";
 import { DEFAULT_BUDGETS } from "@vouch/protocol";
-import { executeRun, loadTask } from "@vouch/engine";
-import { getString, parseArgs } from "./args.js";
+import { executeLocalRun, executeRun, loadTask } from "@vouch/engine";
+import { parseArgs } from "./args.js";
+import { parseRunOptions } from "./run-options.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, "../../..");
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const BENCH_DIR = resolve(REPO_ROOT, "bench");
 const RUNS_DIR = resolve(REPO_ROOT, "runs");
 
-const DEFAULT_MODEL = "claude-sonnet-5";
-const GRADER_VERSION = "0.0.0";
-
-function isCondition(v: string | undefined): v is Condition {
-  return v === "A" || v === "B" || v === "C";
+function costLabel(cost: number | null): string {
+  return cost === null ? "unavailable" : cost.toFixed(4);
 }
 
 async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
-  const taskId = getString(flags, "task");
-  const conditionRaw = getString(flags, "condition");
-  if (!taskId) throw new Error("--task <id> is required");
-  if (!isCondition(conditionRaw)) {
-    throw new Error("--condition must be one of A | B | C");
+  const options = parseRunOptions(flags);
+  const controller = new AbortController();
+  const interrupt = () => controller.abort();
+  process.once("SIGINT", interrupt);
+  process.once("SIGTERM", interrupt);
+  try {
+    if (options.kind === "repository") {
+      const report = readFileSync(resolve(options.reportPath), "utf8");
+      if (!report.trim()) throw new Error("the supplied report is empty");
+      const record = await executeLocalRun({
+        repoPath: resolve(options.repoPath),
+        ref: options.ref,
+        report,
+        regressionPath: options.regressionPath,
+        runsDir: RUNS_DIR,
+        mode: options.mode,
+        model: options.model,
+        reviewModel: options.reviewModel,
+        budgets: DEFAULT_BUDGETS,
+        seed: options.seed,
+        patchPath: options.patchPath ? resolve(options.patchPath) : undefined,
+        signal: controller.signal,
+      });
+      process.stdout.write(
+        `run ${record.runId}\n` +
+        `  repository=${options.repoPath} mode=${options.mode} status=${record.status}\n` +
+        `  elapsedMs=${record.elapsedMs} costUsd=${costLabel(record.costUsd)}\n` +
+        `  artifacts=${record.artifacts.dir}\n` +
+        `  patch=${record.artifacts.patch}\n` +
+        `  record=${record.artifacts.record}\n` +
+        `  events=${record.artifacts.events}\n`,
+      );
+      process.exitCode = record.status === "CANCELLED" ? 130 :
+        record.status === "FIXED_VERIFIED" || record.status === "NOT_REPRODUCIBLE" ? 0 : 1;
+      return;
+    }
+    const task = loadTask(BENCH_DIR, options.taskId);
+    const record = await executeRun({
+      task,
+      config: {
+        model: options.model.model,
+        provider: options.model.provider,
+        mode: options.mode,
+        seed: options.seed,
+        budgets: DEFAULT_BUDGETS,
+        condition: options.condition,
+        graderVersion: "0.0.0",
+      },
+      runsDir: RUNS_DIR,
+      repoRoot: REPO_ROOT,
+      benchDir: BENCH_DIR,
+      signal: controller.signal,
+    });
+    const metrics = record.metrics;
+    process.stdout.write(
+      `run ${record.runId}\n` +
+      `  task=${record.taskId} condition=${record.condition} mode=${options.mode} status=${record.status}\n` +
+      `  configHash=${record.configHash} elapsedMs=${record.elapsedMs} costUsd=${costLabel(record.costUsd)}\n` +
+      (metrics ? `  metrics: exploitNeutralized=${metrics.exploitNeutralized} functionalPass=${metrics.functionalPass} diffLines=${metrics.diffLineCount} guarded=${metrics.guardedFilesTouched}\n` : "") +
+      `  log=${resolve(RUNS_DIR, `${record.runId}.jsonl`)} (${record.events.length} events)\n`,
+    );
+    process.exitCode = record.status === "CANCELLED" ? 130 :
+      record.status === "FIXED_VERIFIED" || record.status === "NOT_REPRODUCIBLE" ? 0 : 1;
+  } finally {
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", interrupt);
   }
-  const seed = Number(getString(flags, "seed") ?? "1");
-  const model = getString(flags, "model") ?? DEFAULT_MODEL;
-  const provider = getString(flags, "provider");
-
-  const task = loadTask(BENCH_DIR, taskId);
-  const config: RunConfig = {
-    model,
-    provider,
-    seed,
-    budgets: DEFAULT_BUDGETS,
-    condition: conditionRaw,
-    graderVersion: GRADER_VERSION,
-  };
-
-  const record = await executeRun({
-    task,
-    config,
-    runsDir: RUNS_DIR,
-    repoRoot: REPO_ROOT,
-    benchDir: BENCH_DIR,
-  });
-  const m = record.metrics;
-  process.stdout.write(
-    `run ${record.runId}\n` +
-      `  task=${record.taskId} condition=${record.condition} status=${record.status}\n` +
-      `  configHash=${record.configHash} elapsedMs=${record.elapsedMs} costUsd=${record.costUsd.toFixed(4)}\n` +
-      (m
-        ? `  metrics: exploitNeutralized=${m.exploitNeutralized} functionalPass=${m.functionalPass} diffLines=${m.diffLineCount} guarded=${m.guardedFilesTouched}\n`
-        : "") +
-      `  log=runs/${record.runId}.jsonl (${record.events.length} events)\n`,
-  );
 }
 
 async function main(): Promise<void> {
   const { command, flags } = parseArgs(process.argv.slice(2));
-  switch (command) {
-    case "run":
-      await cmdRun(flags);
-      break;
-    default:
-      process.stderr.write(
-        "usage: vouch run --task <id> --condition <A|B|C> [--seed N] [--model M] [--provider anthropic|openai]\n",
-      );
-      process.exit(command ? 1 : 0);
+  if (command === "run") {
+    await cmdRun(flags);
+    return;
   }
+  process.stderr.write(
+    "usage:\n" +
+    "  vouch run --repo <path> --report <file> --regression <repo-relative path> [--ref HEAD] [--mode live|scripted] [--patch <file>]\n" +
+    "    [--model <id>] [--provider anthropic|openai|compatible] [--base-url <url>] [--api-key-env <name>] [--red-model <review model>] [--seed N]\n" +
+    "  vouch run --task <id> --condition <A|B|C> --mode scripted [--seed N]\n",
+  );
+  process.exitCode = command ? 1 : 0;
 }
 
 main().catch((err) => {
   process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(1);
+  process.exitCode = 1;
 });

@@ -31,6 +31,8 @@ export interface GradeInput {
   diffLineCount: number;
   timeoutMs: number;
   extraPath?: string;
+  signal?: AbortSignal;
+  remainingTimeoutMs?: () => number;
 }
 
 export interface GradeResult {
@@ -54,12 +56,14 @@ export async function gradeRun(input: GradeInput): Promise<GradeResult> {
   if (existsSync(src)) copyFileSync(src, dest);
 
   const exploit = await runTestCommand(input.worktreeDir, grader.exploitCmd, {
-    timeoutMs: input.timeoutMs,
+    timeoutMs: input.remainingTimeoutMs?.() ?? input.timeoutMs,
     extraPath: input.extraPath,
+    signal: input.signal,
   });
   const functional = await runTestCommand(input.worktreeDir, grader.functionalCmd, {
-    timeoutMs: input.timeoutMs,
+    timeoutMs: input.remainingTimeoutMs?.() ?? input.timeoutMs,
     extraPath: input.extraPath,
+    signal: input.signal,
   });
 
   const guardedFilesTouched = input.changedFiles.some((f) =>

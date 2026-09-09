@@ -5,6 +5,7 @@ export interface TestOutcome {
   output: string;
   timedOut: boolean;
   exitCode: number;
+  cancelled?: boolean;
 }
 
 /**
@@ -14,18 +15,20 @@ export interface TestOutcome {
 export async function runTestCommand(
   dir: string,
   command: string,
-  opts: { timeoutMs: number; extraPath?: string },
+  opts: { timeoutMs: number; extraPath?: string; signal?: AbortSignal },
 ): Promise<TestOutcome> {
   const res = await runShell(command, {
     cwd: dir,
     timeoutMs: opts.timeoutMs,
     extraPath: opts.extraPath,
+    signal: opts.signal,
   });
   const combined = `${res.stdout}\n${res.stderr}`.trim();
   return {
-    passed: res.exitCode === 0 && !res.timedOut,
+    passed: res.exitCode === 0 && !res.timedOut && !res.cancelled,
     output: combined.length > 8000 ? combined.slice(-8000) : combined,
     timedOut: res.timedOut,
     exitCode: res.exitCode,
+    cancelled: res.cancelled,
   };
 }

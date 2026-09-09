@@ -1,4 +1,6 @@
 export type Condition = "A" | "B" | "C";
+export type ExecutionMode = "live" | "scripted";
+export type AgentRole = "solo" | "red" | "blue";
 
 export type TaskKind = "vuln" | "control_fixed" | "control_na";
 export type TaskSource = "real_cve" | "synthetic";
@@ -48,6 +50,9 @@ export type RunStatus =
   | "FAILED_NO_FIX"
   | "BROKE_FUNCTION"
   | "BUDGET_TIMEOUT"
+  | "CANCELLED"
+  | "SETUP_ERROR"
+  | "INVALID_REPRODUCTION"
   | "INFRA_ERROR";
 
 export type EngineState =
@@ -68,6 +73,7 @@ export interface GradeMetrics {
 }
 
 export interface BaseEvent {
+  schemaVersion?: number;
   runId: string;
   seq: number;
   ts: number;
@@ -76,9 +82,12 @@ export interface BaseEvent {
 
 export interface RunStartEvent extends BaseEvent {
   type: "run_start";
+  runKind: "benchmark" | "local_repository";
   configHash: string;
-  taskId: string;
-  condition: Condition;
+  taskId?: string;
+  mode?: ExecutionMode;
+  repository?: { name: string; commit: string; ref: string };
+  condition?: Condition;
   model: string;
   seed: number;
   budgets: Budgets;
@@ -94,6 +103,11 @@ export interface ToolCallEvent extends BaseEvent {
   type: "tool_call";
   name: string;
   args: unknown;
+  callId?: string;
+  agentRole?: AgentRole;
+  stage?: EngineState;
+  outcome?: "started";
+  durationMs?: number;
 }
 
 export interface ToolResultEvent extends BaseEvent {
@@ -101,6 +115,75 @@ export interface ToolResultEvent extends BaseEvent {
   name: string;
   result: unknown;
   truncated: boolean;
+  callId?: string;
+  agentRole?: AgentRole;
+  stage?: EngineState;
+  outcome?: "succeeded" | "failed";
+  durationMs?: number;
+}
+
+export interface ToolErrorEvent extends BaseEvent {
+  type: "tool_error";
+  name: string;
+  callId: string;
+  agentRole?: AgentRole;
+  stage?: EngineState;
+  durationMs: number;
+  outcome: "failed";
+  error: string;
+}
+
+export interface ActionSummaryEvent extends BaseEvent {
+  type: "action_summary";
+  summary: string;
+  agentRole?: AgentRole;
+  stage?: EngineState;
+  callId?: string;
+}
+
+export interface AgentSummaryEvent extends BaseEvent {
+  type: "agent_summary";
+  summary: string;
+  agentRole: AgentRole;
+  stage: EngineState;
+}
+
+export interface GuidanceEvent extends BaseEvent {
+  type: "guidance_configured";
+  id: string;
+  version: string;
+  agentRole: AgentRole;
+}
+
+export interface RepositoryEvent extends BaseEvent {
+  type: "repository_snapshot";
+  name: string;
+  commit: string;
+  files: string[];
+  artifact: string;
+  inputHash?: string;
+}
+
+export interface FileChangeEvent extends BaseEvent {
+  type: "file_change";
+  path: string;
+  agentRole: AgentRole;
+  patch: string;
+  artifact: string;
+}
+
+export interface TestRunEvent extends BaseEvent {
+  type: "test_run";
+  phase: string;
+  outcome: string;
+  passed: boolean;
+  testsPassed: number;
+  testsFailed: number;
+  testsSkipped: number;
+  artifact: string;
+  agentRole?: AgentRole;
+  stage?: EngineState;
+  durationMs?: number;
 }
 
 export interface ModelMsgEvent extends BaseEvent {
@@ -108,6 +191,8 @@ export interface ModelMsgEvent extends BaseEvent {
   role: "system" | "user" | "assistant" | "tool";
   tokensIn: number;
   tokensOut: number;
+  agentRole?: AgentRole;
+  stage?: EngineState;
 }
 
 export interface BudgetUpdateEvent extends BaseEvent {
@@ -115,6 +200,8 @@ export interface BudgetUpdateEvent extends BaseEvent {
   tokens: number;
   steps: number;
   elapsedMs: number;
+  agentRole?: AgentRole;
+  stage?: EngineState;
 }
 
 export interface DiffSnapshotEvent extends BaseEvent {
@@ -130,8 +217,9 @@ export interface GradeEvent extends BaseEvent {
 export interface RunEndEvent extends BaseEvent {
   type: "run_end";
   status: RunStatus;
-  costUsd: number;
+  costUsd: number | null;
   elapsedMs: number;
+  reason?: string;
 }
 
 /** Which model actually served a harness role (evidence for the run record). */
@@ -139,6 +227,8 @@ export interface RoleAssignedEvent extends BaseEvent {
   type: "role_assigned";
   role: "solo" | "red" | "blue";
   runner: string;
+  model?: string;
+  provider?: string;
 }
 
 /**
@@ -156,6 +246,13 @@ export type HarnessEvent =
   | StateChangeEvent
   | ToolCallEvent
   | ToolResultEvent
+  | ToolErrorEvent
+  | ActionSummaryEvent
+  | AgentSummaryEvent
+  | GuidanceEvent
+  | RepositoryEvent
+  | FileChangeEvent
+  | TestRunEvent
   | ModelMsgEvent
   | BudgetUpdateEvent
   | DiffSnapshotEvent
@@ -173,6 +270,7 @@ export type DistributiveOmit<T, K extends keyof any> = T extends unknown
 export type EventInput = DistributiveOmit<HarnessEvent, "runId" | "seq" | "ts">;
 
 export interface RunConfig {
+  mode?: ExecutionMode;
   model: string;
   /** Model provider; inferred from the model id when omitted. */
   provider?: string;

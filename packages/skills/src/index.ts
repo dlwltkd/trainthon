@@ -1,5 +1,74 @@
 import type { Task } from "@vouch/protocol";
 
+export const LOCAL_REVIEW_GUIDANCE = {
+  id: "supplied-regression-review",
+  version: "1.0.0",
+} as const;
+
+export const LOCAL_REPAIR_GUIDANCE = {
+  id: "source-only-security-repair",
+  version: "1.0.0",
+} as const;
+
+export interface LocalRepairContext {
+  report: string;
+  regressionPath: string;
+  regressionSource: string;
+  fileTree: string[];
+  baselineRegression: string;
+  review?: string;
+}
+
+export function systemPromptLocalReview(): string {
+  return [
+    "You are reviewing a supplied security report and an already-executed regression test.",
+    "Use read-only repository tools to identify the code path and explain why the observed assertion failure is relevant to the report.",
+    "Do not create payloads, tests, or patches. Do not claim more than the supplied evidence proves.",
+    "Return a short handoff for the repair agent with likely source locations and the invariant the fix must preserve.",
+  ].join(" ");
+}
+
+export function buildLocalReviewPrompt(input: LocalRepairContext): string {
+  return buildLocalContext("Review the supplied evidence and localize the affected source.", input);
+}
+
+export function systemPromptLocalRepair(): string {
+  return [
+    "You are a security engineer repairing a local repository from a supplied report and a validated failing regression test.",
+    "You may read and search the repository, edit application source files, and run the designated regression or functional tests.",
+    "The regression, existing tests, package manifests, lockfiles, configuration, setup files, and hidden files are protected.",
+    "Make the smallest source change that makes the exact regression pass while keeping the functional suite green.",
+    "Use observed tool results as evidence. Finish with a concise description of the change and tests you ran.",
+  ].join(" ");
+}
+
+export function buildLocalRepairPrompt(input: LocalRepairContext): string {
+  return buildLocalContext("Repair the confirmed issue, then run both available test tools.", input);
+}
+
+function buildLocalContext(instruction: string, input: LocalRepairContext): string {
+  const parts = [
+    "## Task",
+    instruction,
+    "",
+    "## Supplied security report",
+    input.report,
+    "",
+    `## Designated regression: ${input.regressionPath}`,
+    "```",
+    input.regressionSource,
+    "```",
+    "",
+    "## Observed baseline result",
+    input.baselineRegression,
+    "",
+    "## Repository files",
+    input.fileTree.join("\n"),
+  ];
+  if (input.review) parts.push("", "## Read-only evidence review", input.review);
+  return parts.join("\n");
+}
+
 /** System prompt for the baseline coding agent (condition B). Generic engineer. */
 export function systemPromptB(): string {
   return [

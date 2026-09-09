@@ -19,3 +19,12 @@ export function computeCost(
     (outputTokens / 1_000_000) * pricing.outputPerMTok
   );
 }
+
+/** No price is inferred from a model name or a different provider's rates. */
+export function estimateCost(inputTokens: number, outputTokens: number, pricing?: Pricing): number | null {
+  if (!pricing) return null;
+  if (![pricing.inputPerMTok, pricing.outputPerMTok].every((rate) => Number.isFinite(rate) && rate >= 0)) {
+    throw new Error("Model pricing must contain finite nonnegative rates");
+  }
+  return computeCost(inputTokens, outputTokens, pricing);
+}

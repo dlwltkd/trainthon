@@ -9,6 +9,7 @@ export function configHash(config: RunConfig, taskId: string): string {
   const canonical = JSON.stringify({
     model: config.model,
     provider: config.provider ?? null,
+    mode: config.mode ?? "live",
     seed: config.seed,
     budgets: config.budgets,
     condition: config.condition,

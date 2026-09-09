@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@vouch/engine": "workspace:*",
-    "@vouch/protocol": "workspace:*"
+    "@vouch/protocol": "workspace:*",
+    "@vouch/model": "workspace:*"
   }
 }
