@@ -13,6 +13,8 @@ export interface CreateWorktreeOptions {
   /** Path (relative to repoRoot) of the target code to copy. */
   sourcePath: string;
   runId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 const GIT_IDENTITY = [
@@ -21,6 +23,14 @@ const GIT_IDENTITY = [
   "-c",
   "user.name=vouch",
 ];
+
+async function runGit(dir: string, args: string[], opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<string> {
+  const result = await runCommand("git", args, { cwd: dir, timeoutMs: opts.timeoutMs ?? 20_000, signal: opts.signal });
+  if (result.cancelled) throw opts.signal?.reason ?? new Error("Git command cancelled");
+  if (result.timedOut) throw new Error(`Git command timed out: git ${args[0] ?? ""}`);
+  if (result.exitCode !== 0) throw new Error(`Git command failed: git ${args[0] ?? ""}: ${result.stderr.slice(-2000)}`);
+  return result.stdout;
+}
 
 /**
  * Copies the target code into `.worktrees/<runId>` and takes a baseline git
@@ -41,13 +51,9 @@ export async function createWorktree(
   }
   cpSync(src, dir, { recursive: true });
 
-  const t = 20_000;
-  await runCommand("git", ["init", "-q"], { cwd: dir, timeoutMs: t });
-  await runCommand("git", ["add", "-A"], { cwd: dir, timeoutMs: t });
-  await runCommand("git", [...GIT_IDENTITY, "commit", "-q", "-m", "baseline"], {
-    cwd: dir,
-    timeoutMs: t,
-  });
+  await runGit(dir, ["init", "-q"], opts);
+  await runGit(dir, ["add", "-A"], opts);
+  await runGit(dir, [...GIT_IDENTITY, "commit", "-q", "-m", "baseline"], opts);
 
   return {
     dir,
@@ -62,10 +68,9 @@ export async function createWorktree(
 }
 
 /** Revert all agent edits back to the baseline commit (tracked + untracked). */
-export async function resetWorktree(dir: string): Promise<void> {
-  const t = 20_000;
-  await runCommand("git", ["checkout", "--", "."], { cwd: dir, timeoutMs: t });
-  await runCommand("git", ["clean", "-fd"], { cwd: dir, timeoutMs: t });
+export async function resetWorktree(dir: string, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<void> {
+  await runGit(dir, ["checkout", "--", "."], opts);
+  await runGit(dir, ["clean", "-fd"], opts);
 }
 
 export interface DiffResult {
@@ -75,24 +80,17 @@ export interface DiffResult {
 }
 
 /** Captures the agent's edits (including new files) relative to the baseline. */
-export async function getDiff(dir: string): Promise<DiffResult> {
-  const t = 20_000;
-  await runCommand("git", ["add", "-A"], { cwd: dir, timeoutMs: t });
-  const patchRes = await runCommand("git", ["diff", "--cached"], { cwd: dir, timeoutMs: t });
-  const namesRes = await runCommand("git", ["diff", "--cached", "--name-only"], {
-    cwd: dir,
-    timeoutMs: t,
-  });
-  const numstat = await runCommand("git", ["diff", "--cached", "--numstat"], {
-    cwd: dir,
-    timeoutMs: t,
-  });
-  const changedFiles = namesRes.stdout
+export async function getDiff(dir: string, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<DiffResult> {
+  await runGit(dir, ["add", "-A"], opts);
+  const patch = await runGit(dir, ["diff", "--cached"], opts);
+  const names = await runGit(dir, ["diff", "--cached", "--name-only"], opts);
+  const numstat = await runGit(dir, ["diff", "--cached", "--numstat"], opts);
+  const changedFiles = names
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
   let lineCount = 0;
-  for (const line of numstat.stdout.split("\n")) {
+  for (const line of numstat.split("\n")) {
     const parts = line.trim().split(/\s+/);
     if (parts.length >= 2) {
       const added = parseInt(parts[0]!, 10);
@@ -101,5 +99,5 @@ export async function getDiff(dir: string): Promise<DiffResult> {
       if (!Number.isNaN(deleted)) lineCount += deleted;
     }
   }
-  return { patch: patchRes.stdout, changedFiles, lineCount };
+  return { patch, changedFiles, lineCount };
 }

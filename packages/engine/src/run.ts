@@ -41,7 +41,7 @@ import {
   REPRO_PATH,
   buildRunReproTool,
   buildSubmitReproTool,
-  reproPasses,
+  runReproOutcome,
   type ReproState,
 } from "./repro-tools.js";
 
@@ -161,7 +161,7 @@ interface Outcome {
 
 async function diffAndGrade(ctx: RunContext): Promise<Pick<Outcome, "status" | "metrics">> {
   ctx.budget.assertActive();
-  const diff = await getDiff(ctx.worktreeDir);
+  const diff = await getDiff(ctx.worktreeDir, { signal: ctx.budget.signal, timeoutMs: remainingTimeout(ctx) });
   ctx.logger.emit({ type: "diff_snapshot", patch: diff.patch });
   const grade = await gradeRun({
     benchDir: ctx.benchDir,
@@ -182,7 +182,7 @@ async function diffAndGrade(ctx: RunContext): Promise<Pick<Outcome, "status" | "
 
 function remainingTimeout(ctx: RunContext): number {
   ctx.budget.assertActive();
-  return Math.max(1, Math.min(STEP_TIMEOUT_MS, ctx.config.budgets.maxWallMs - ctx.budget.elapsedMs));
+  return Math.max(1, Math.min(STEP_TIMEOUT_MS, ctx.budget.limits.maxWallMs - ctx.budget.elapsedMs));
 }
 
 export function gatedStatus(status: RunStatus, regressionPassed: boolean, functionalPassed: boolean): RunStatus {
@@ -275,7 +275,7 @@ async function runHarness(ctx: RunContext): Promise<Outcome> {
   if (!state.reproduced) {
     // The gate refuses to patch without proof: revert Red's scratch work so
     // the diff is exactly zero, then let the external grader score it.
-    await resetWorktree(ctx.worktreeDir);
+    await resetWorktree(ctx.worktreeDir, { signal: ctx.budget.signal, timeoutMs: remainingTimeout(ctx) });
     logger.emit({ type: "state_change", from: "REPRODUCE", to: "VERIFY" });
     const graded = await diffAndGrade(ctx);
     logger.emit({ type: "state_change", from: "VERIFY", to: "DONE" });
@@ -303,12 +303,21 @@ async function runHarness(ctx: RunContext): Promise<Outcome> {
 
   // VERIFY (completion gate, harness-run; independent of what the model claimed)
   logger.emit({ type: "state_change", from: "PATCH", to: "VERIFY" });
-  const pocNeutralized = await reproPasses(reproCtx);
+  const regressionOutcome = await runReproOutcome(reproCtx);
+  if (regressionOutcome === "cancelled") ctx.budget.assertActive();
+  if (regressionOutcome === "timeout" || regressionOutcome === "invalid" || regressionOutcome === "error") {
+    throw new Error(`regression verification failed to complete: ${regressionOutcome}`);
+  }
+  const pocNeutralized = regressionOutcome === "passed";
   const functional = await runTestCommand(ctx.worktreeDir, ctx.testCmd, {
     timeoutMs: remainingTimeout(ctx),
     extraPath: ctx.extraPath,
     signal: ctx.budget.signal,
   });
+  if (functional.cancelled) ctx.budget.assertActive();
+  if (functional.timedOut || (!functional.passed && functional.exitCode !== 1)) {
+    throw new Error(`functional verification failed to complete: ${functional.timedOut ? "timeout" : `exit ${functional.exitCode}`}`);
+  }
   logger.emit({
     type: "gate",
     phase: "verify",
@@ -328,7 +337,8 @@ async function runHarness(ctx: RunContext): Promise<Outcome> {
 // ---------------------------------------------------------------------------
 
 export async function executeRun(opts: ExecuteRunOptions): Promise<RunRecord> {
-  const { task, config, runsDir, repoRoot, benchDir } = opts;
+  const { task, runsDir, repoRoot, benchDir } = opts;
+  const config: RunConfig = Object.freeze({ ...opts.config, budgets: Object.freeze({ ...opts.config.budgets }) });
   const runId = makeRunId(task.id, config.condition, config.seed);
   const logger = new EventLogger(runId, join(runsDir, `${runId}.jsonl`), opts.onEvent);
   const hash = configHash(config, task.id);
@@ -362,7 +372,13 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<RunRecord> {
     budget = new RunBudget(config.budgets, opts.signal);
     budget.assertActive();
     logger.emit({ type: "state_change", from: "INIT", to: "CONTEXT" });
-    worktree = await createWorktree({ repoRoot, sourcePath: task.repoRef.url, runId });
+    worktree = await createWorktree({
+      repoRoot,
+      sourcePath: task.repoRef.url,
+      runId,
+      signal: budget.signal,
+      timeoutMs: Math.max(1, Math.min(20_000, budget.limits.maxWallMs - budget.elapsedMs)),
+    });
 
     const ctx: RunContext = {
       task,
@@ -394,6 +410,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<RunRecord> {
   const endedAt = Date.now();
   const elapsedMs = endedAt - startedAt;
   logger.emit({ type: "run_end", status, costUsd, elapsedMs, reason });
+  logger.seal();
 
   return {
     runId,

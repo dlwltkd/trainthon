@@ -134,3 +134,7 @@ export function buildRunReproTool(ctx: ReproToolContext): AgentTool {
 export async function reproPasses(ctx: ReproToolContext): Promise<boolean> {
   return (await runRepro(ctx)).outcome === "passed";
 }
+
+export async function runReproOutcome(ctx: ReproToolContext): Promise<RegressionOutcome> {
+  return (await runRepro(ctx)).outcome;
+}
