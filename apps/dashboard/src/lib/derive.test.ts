@@ -36,6 +36,7 @@ describe("agent activity derivation", () => {
     const view = deriveRun(events)!;
     expect(view.currentModel).toBeUndefined();
     expect(view.activity.filter(item => item.kind === "model")).toHaveLength(2);
+    expect(view.activity.find(item => item.kind === "model")).toMatchObject({ phase: "failed", detail: expect.stringContaining("Retry sent as attempt 2") });
     expect(view.usage.modelTurns).toBe(1);
     expect(view.usage.tokens).toBe(175);
   });

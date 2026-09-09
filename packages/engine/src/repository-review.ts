@@ -202,7 +202,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     seed: options.seed, budgets: options.budgets, requestPolicy: REQUEST_POLICY, usage: budget?.usage ?? { inputTokens: 0, outputTokens: 0, steps: 0 }, usageKnown: budget?.usageKnown ?? true,
     repository: { name: source?.name ?? basename(options.repoPath), url: source?.url, requestedRef: options.ref ?? "HEAD", commit: workspace?.commit ?? null, files: workspace?.files.length ?? 0 },
     model: options.model, ...(options.reviewModel ? { reviewModel: options.reviewModel, reviewSummary, ...(reviewStatus ? { reviewStatus } : {}), ...(reviewFailure ? { reviewFailure } : {}) } : {}), verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged },
-    findings: [...recordedFindings.values()], assessments: toolset?.assessments() ?? [], unassessedFindingIds: toolset?.unassessedFindingIds() ?? [], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },
+    findings: [...recordedFindings.values()], assessments: toolset?.assessments() ?? [], unassessedFindingIds: toolset?.unassessedFindingIds() ?? reviewToolset?.findings().map(finding => finding.findingId) ?? [], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },
     ...(delivery ? { delivery } : {}), artifacts,
   };
   writeJson(artifacts.record, record);

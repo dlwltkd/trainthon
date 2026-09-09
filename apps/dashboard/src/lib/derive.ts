@@ -673,6 +673,11 @@ export function deriveRun(events: HarnessEvent[], finalUsageKnown?: boolean, fin
         const id = `model-${event.requestId}-${event.attempt}`;
         let item = requests.get(id);
         if (!item) {
+          const previous = requests.get(`model-${event.requestId}-${event.attempt - 1}`);
+          if (previous?.phase === "retry_wait") {
+            previous.phase = "failed";
+            previous.detail = `${previous.detail ?? "Request failed."} Retry sent as attempt ${event.attempt}.`;
+          }
           item = { ...event, kind: "model", id };
           requests.set(id, item);
           view.activity.push(item);
