@@ -46,6 +46,7 @@ export interface Budgets {
 export type RunStatus =
   | "RUNNING"
   | "FIXED_VERIFIED"
+  | "TESTS_PASSED"
   | "NOT_REPRODUCIBLE"
   | "FAILED_NO_FIX"
   | "BROKE_FUNCTION"

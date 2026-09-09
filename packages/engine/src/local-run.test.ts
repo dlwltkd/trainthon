@@ -10,9 +10,26 @@ import type {
   StructuredTestResult,
   TestSelection,
 } from "@vouch/sandbox";
-import { executeLocalRun } from "./local-run.js";
+import { executeLocalRun as runLocal, type ExecuteLocalRunOptions } from "./local-run.js";
 
 const roots: string[] = [];
+
+async function executeLocalRun(options: ExecuteLocalRunOptions) {
+  const record = await runLocal(options);
+  expect(record.status).not.toBe("FIXED_VERIFIED");
+  expect(record.verification).toMatchObject({ scope: "repository_tests", independentGrader: false });
+  expect(JSON.parse(readFileSync(record.artifacts.record, "utf8"))).toEqual(record);
+  const events = readFileSync(record.artifacts.events, "utf8").trim().split("\n").map(line => JSON.parse(line));
+  expect(events.at(-1)).toMatchObject({
+    type: "run_end",
+    status: record.status,
+    reason: record.reason,
+    elapsedMs: record.elapsedMs,
+    costUsd: record.costUsd,
+  });
+  expect(events.some(event => event.status === "FIXED_VERIFIED")).toBe(false);
+  return record;
+}
 
 function result(status: StructuredTestResult["status"], selection: TestSelection = "regression"): StructuredTestResult {
   const passed = status === "passed";
@@ -131,7 +148,7 @@ afterEach(() => {
 });
 
 describe("executeLocalRun", () => {
-  it("repairs source and verifies the exact regression plus functional suite in a fresh copy", async () => {
+  it("reports repository tests passed without claiming independent security verification", async () => {
     const input = fixture();
     const runner = new SourceAwareRunner();
     const repairRunner = new ScriptedRunner(async (tools) => {
@@ -144,8 +161,9 @@ describe("executeLocalRun", () => {
     });
     const record = await executeLocalRun({ ...options(input, runner), repairRunner });
 
-    expect(record.status).toBe("FIXED_VERIFIED");
-    expect(record.verification).toEqual({ reproduced: true, regressionPassed: true, functionalPassed: true, regressionManifestMatched: true, functionalManifestMatched: true });
+    expect(record.status).toBe("TESTS_PASSED");
+    expect(record.reason).toContain("do not independently verify a security fix");
+    expect(record.verification).toEqual({ scope: "repository_tests", independentGrader: false, reproduced: true, regressionPassed: true, functionalPassed: true, regressionManifestMatched: true, functionalManifestMatched: true });
     expect(record.changes.files).toEqual(["src/value.ts"]);
     expect(readFileSync(join(input.repo, "src/value.ts"), "utf8")).toContain("return value;");
     expect(readFileSync(record.artifacts.patch, "utf8")).toContain("value.replace");
@@ -186,6 +204,20 @@ describe("executeLocalRun", () => {
     expect(record.changes).toEqual({ files: [], lineCount: 0 });
     expect(readFileSync(record.artifacts.patch, "utf8")).toBe("");
     expect(invoked).toBe(false);
+  });
+
+  it("reports invalid reproduction evidence without attempting repair", async () => {
+    const input = fixture();
+    class InvalidRegressionRunner extends SourceAwareRunner {
+      override async runTests(dir: string, selection: TestSelection): Promise<StructuredTestResult> {
+        return selection === "regression" ? result("invalid") : super.runTests(dir, selection);
+      }
+    }
+    const record = await executeLocalRun(options(input, new InvalidRegressionRunner()));
+
+    expect(record.status).toBe("INVALID_REPRODUCTION");
+    expect(record.verification.reproduced).toBe(false);
+    expect(record.modelUsage.repair.invoked).toBe(false);
   });
 
   it("rejects a scripted patch that targets the protected regression", async () => {
@@ -234,6 +266,45 @@ describe("executeLocalRun", () => {
     expect(existsSync(record.artifacts.record)).toBe(true);
     expect(recordExistedDuringCleanup).toBe(true);
     expect(runner.cleaned).toBe(true);
+  });
+
+  it.each([false, true])("does not retain a success status when cleanup fails (already passing: %s)", async (alreadyPassing) => {
+    const input = fixture(alreadyPassing);
+    class FailingCleanupRunner extends SourceAwareRunner {
+      override async cleanup(): Promise<void> {
+        throw new Error("container removal failed");
+      }
+    }
+    const repairRunner = new ScriptedRunner(async (tools) => {
+      await tools["write_file"]?.({
+        path: "src/value.ts",
+        content: "export function clean(value: string) { return value.replace(/</g, ''); }\n",
+      });
+      return "fixed";
+    });
+    const record = await executeLocalRun({ ...options(input, new FailingCleanupRunner()), repairRunner });
+
+    expect(record.status).toBe("INFRA_ERROR");
+    expect(record.reason).toContain("runner cleanup failed: container removal failed");
+    expect(record.verification.regressionPassed).toBe(alreadyPassing ? null : true);
+  });
+
+  it("retains source changes when a later protected write fails", async () => {
+    const input = fixture();
+    const repairRunner = new ScriptedRunner(async (tools) => {
+      await tools["write_file"]?.({
+        path: "src/value.ts",
+        content: "export function clean(value: string) { return value.replace(/</g, ''); }\n",
+      });
+      await tools["write_file"]?.({ path: "tests/security.test.ts", content: "// changed test\n" });
+      return "unexpected";
+    });
+    const record = await executeLocalRun({ ...options(input, new SourceAwareRunner()), repairRunner });
+
+    expect(record.status).toBe("FAILED_NO_FIX");
+    expect(record.reason).toContain("only application source files may be edited");
+    expect(record.changes.files).toEqual(["src/value.ts"]);
+    expect(readFileSync(record.artifacts.patch, "utf8")).toContain("value.replace");
   });
 
   it("rejects a passing verification when the functional test inventory changes", async () => {
@@ -297,7 +368,7 @@ describe("executeLocalRun", () => {
     });
 
     expect(record.status).toBe("CANCELLED");
-    expect(record.verification).toEqual({ reproduced: true, regressionPassed: null, functionalPassed: null, regressionManifestMatched: null, functionalManifestMatched: null });
+    expect(record.verification).toEqual({ scope: "repository_tests", independentGrader: false, reproduced: true, regressionPassed: null, functionalPassed: null, regressionManifestMatched: null, functionalManifestMatched: null });
     const events = readFileSync(record.artifacts.events, "utf8").trim().split("\n").map(line => JSON.parse(line));
     expect(events.at(-1)?.type).toBe("run_end");
     expect(events.some(event => event.type === "test_run" && event.phase.startsWith("agent-regression"))).toBe(true);

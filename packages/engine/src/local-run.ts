@@ -105,14 +105,16 @@ export interface StoredTestEvidence {
   result: StructuredTestResult;
 }
 
+export type LocalRunStatus = Exclude<RunStatus, "RUNNING" | "FIXED_VERIFIED">;
+
 export interface LocalRunRecord {
-  schemaVersion: 2;
+  schemaVersion: 3;
   kind: "local_repository";
   runId: string;
   mode: ExecutionMode;
   configHash: string;
   inputHash: string | null;
-  status: RunStatus;
+  status: LocalRunStatus;
   reason?: string;
   startedAt: number;
   endedAt: number;
@@ -140,6 +142,8 @@ export interface LocalRunRecord {
   };
   runtime: ProjectRuntime | null;
   verification: {
+    scope: "repository_tests";
+    independentGrader: false;
     reproduced: boolean | null;
     regressionPassed: boolean | null;
     functionalPassed: boolean | null;
@@ -336,7 +340,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
   let workspace: LocalWorkspace | undefined;
   let runner: ProjectTestRunner | undefined;
   let state: EngineState = "INIT";
-  let status: RunStatus = "INFRA_ERROR";
+  let status: LocalRunStatus = "INFRA_ERROR";
   let reason: string | undefined;
   let setupComplete = false;
   let reproduced: boolean | null = null;
@@ -660,10 +664,10 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
             : `regression verification did not pass: ${verifiedRegression.reason ?? verifiedRegression.status}`;
         } else if (!diff.changedFiles.length) {
           status = "FAILED_NO_FIX";
-          reason = "verification passed without a source change; the harness will not claim a verified fix";
+          reason = "repository tests passed without a source change; no repair was produced";
         } else {
-          status = "FIXED_VERIFIED";
-          reason = "the exact supplied regression and protected functional suite passed in a fresh verification workspace";
+          status = "TESTS_PASSED";
+          reason = "the supplied regression and functional suite passed in a fresh workspace; these tests share a runtime with candidate code and do not independently verify a security fix";
         }
         transition("DONE");
       }
@@ -690,7 +694,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
   } catch (error) {
     drainSettled = false;
     acceptingEvidence = false;
-    if (status === "FIXED_VERIFIED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
+    if (status === "TESTS_PASSED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
     reason = reason ? `${reason}; ${errorMessage(error)}` : errorMessage(error);
   }
 
@@ -698,7 +702,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
     try {
       await recordDiff();
     } catch (error) {
-      if (status === "FIXED_VERIFIED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
+      if (status === "TESTS_PASSED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
       reason = reason ? `${reason}; artifact capture failed: ${errorMessage(error)}` : `artifact capture failed: ${errorMessage(error)}`;
     }
   }
@@ -720,7 +724,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
 
   transition("DONE");
   const buildRecord = (endedAt: number): LocalRunRecord => ({
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "local_repository",
       runId,
       mode: options.mode,
@@ -753,7 +757,15 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
         ...(options.mode === "live" && options.reviewModel ? { review: modelMetadata(options.reviewModel) } : {}),
       },
       runtime,
-      verification: { reproduced, regressionPassed, functionalPassed, regressionManifestMatched, functionalManifestMatched },
+      verification: {
+        scope: "repository_tests",
+        independentGrader: false,
+        reproduced,
+        regressionPassed,
+        functionalPassed,
+        regressionManifestMatched,
+        functionalManifestMatched,
+      },
       changes: { files: [...diff.changedFiles], lineCount: diff.lineCount },
       tests: { ...testEvidence },
       artifacts,
@@ -774,13 +786,13 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
   try {
     if (runner) await settleWithin(runner.cleanup(), SETTLE_TIMEOUT_MS, "runner cleanup");
   } catch (error) {
-    if (status === "FIXED_VERIFIED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
+    if (status === "TESTS_PASSED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
     reason = reason ? `${reason}; runner cleanup failed: ${errorMessage(error)}` : `runner cleanup failed: ${errorMessage(error)}`;
   }
   try {
     workspace?.cleanup();
   } catch (error) {
-    if (status === "FIXED_VERIFIED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
+    if (status === "TESTS_PASSED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
     reason = reason ? `${reason}; workspace cleanup failed: ${errorMessage(error)}` : `workspace cleanup failed: ${errorMessage(error)}`;
   }
   budget?.dispose();

@@ -41,6 +41,8 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
       process.stdout.write(
         `run ${record.runId}\n` +
         `  repository=${options.repoPath} mode=${options.mode} status=${record.status}\n` +
+        (record.reason ? `  reason=${record.reason}\n` : "") +
+        `  verification=${record.verification.scope} independentGrader=${record.verification.independentGrader}\n` +
         `  elapsedMs=${record.elapsedMs} costUsd=${costLabel(record.costUsd)}\n` +
         `  artifacts=${record.artifacts.dir}\n` +
         `  patch=${record.artifacts.patch}\n` +
@@ -48,7 +50,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<void> {
         `  events=${record.artifacts.events}\n`,
       );
       process.exitCode = record.status === "CANCELLED" ? 130 :
-        record.status === "FIXED_VERIFIED" || record.status === "NOT_REPRODUCIBLE" ? 0 : 1;
+        record.status === "TESTS_PASSED" || record.status === "NOT_REPRODUCIBLE" ? 0 : 1;
       return;
     }
     const task = loadTask(BENCH_DIR, options.taskId);
