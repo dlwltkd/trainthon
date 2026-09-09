@@ -49,8 +49,60 @@ describe("run CLI options", () => {
     expect(() => parseRunOptions({ ...repository, task: "example" })).toThrow("exactly one");
   });
 
-  it("requires a supplied report and regression", () => {
-    expect(() => parseRunOptions({ repo: "/tmp/project" })).toThrow("--report");
+  it("requires a prompt or regression and keeps supplied reports optional", () => {
+    expect(() => parseRunOptions({ repo: "/tmp/project" })).toThrow("--prompt");
+    expect(() => parseRunOptions({ repo: "/tmp/project", report: "/tmp/report.md" })).toThrow("--prompt");
+    expect(parseRunOptions({ repo: "/tmp/project", regression: "tests/security.test.ts" }, {}))
+      .toMatchObject({ kind: "repository", regressionPath: "tests/security.test.ts", reportPath: undefined });
+    expect(() => parseRunOptions({ ...repository, report: true })).toThrow("--report requires a value");
+    expect(() => parseRunOptions({ ...repository, report: "" })).toThrow("non-empty file path");
+  });
+
+  it("configures prompt-based review with only its actual model role", () => {
+    const options = parseRunOptions({ repo: "../project", prompt: "Review session expiration checks.", ref: "release" }, {
+      VOUCH_RED_PROVIDER: "unused-invalid-provider",
+    });
+    expect(options).toMatchObject({
+      kind: "repository", repoPath: "../project", prompt: "Review session expiration checks.",
+      mode: "live", ref: "release", seed: 1, model: { model: "gpt-5.6-sol", provider: "openai" },
+    });
+    expect(options).not.toHaveProperty("reviewModel");
+    expect(options).not.toHaveProperty("regressionPath");
+    expect(() => parseRunOptions({ repo: "/tmp/project", prompt: "  " })).toThrow("non-empty review instructions");
+    expect(() => parseRunOptions({ ...repository, regression: " " })).toThrow("repository-relative path");
+  });
+
+  it.each(["https://github.com/example/project", "https://github.com/example/project.git/"])(
+    "preserves repository URL %s for engine acquisition",
+    (repo) => {
+      expect(parseRunOptions({ repo, prompt: "Review the authentication code." }, {})).toMatchObject({ repoPath: repo });
+      expect(parseRunOptions({ repo, regression: "tests/test_security.py" }, {})).toMatchObject({ repoPath: repo });
+    },
+  );
+
+  it("rejects unused repair flags and scripted mode for prompt-based review", () => {
+    const flags = { repo: "/tmp/project", prompt: "Review input validation." };
+    expect(() => parseRunOptions({ ...flags, mode: "scripted" })).toThrow("requires --mode live");
+    for (const flag of ["patch", "red-model", "red-provider", "red-base-url", "red-api-key-env"]) {
+      expect(() => parseRunOptions({ ...flags, [flag]: "unused" })).toThrow("only supported with --regression");
+    }
+    expect(() => parseRunOptions({ task: "fixture", mode: "scripted", condition: "C", prompt: "Review" }))
+      .toThrow("--prompt is only supported with --repo");
+  });
+
+  it("opts into untested source remediation only with a boolean --fix flag", () => {
+    const flags = { repo: "https://github.com/example/project", prompt: "Correct justified authorization defects." };
+    expect(parseRunOptions(flags, {})).toMatchObject({ remediate: false });
+    expect(parseRunOptions({ ...flags, fix: true }, {})).toMatchObject({ remediate: true, mode: "live" });
+    expect(parseRunOptions({ ...flags, fix: false }, {})).toMatchObject({ remediate: false });
+    for (const fix of ["true", "false", "yes"]) {
+      expect(() => parseRunOptions({ ...flags, fix })).toThrow("boolean flag");
+    }
+    expect(() => parseRunOptions({ ...repository, fix: true })).toThrow("cannot be combined with --regression");
+    expect(() => parseRunOptions({ repo: flags.repo, fix: true })).toThrow("--prompt");
+    expect(() => parseRunOptions({ ...flags, fix: true, mode: "scripted" })).toThrow("requires --mode live");
+    expect(() => parseRunOptions({ task: "fixture", condition: "C", mode: "scripted", fix: true }))
+      .toThrow("--fix is only supported with --repo");
   });
 
   it("never silently switches legacy tasks to scripted mode", () => {

@@ -55,6 +55,7 @@ import {
 } from "@vouch/skills";
 import { EventLogger } from "./logger.js";
 import { buildLocalRepairTools, buildLocalReviewTools } from "./local-tools.js";
+import { acquireRepository, repositoryIdentity, saveSourceSnapshot, saveDeliverySnapshot } from "./repository-source.js";
 
 const TEST_TIMEOUT_MS = 60_000;
 const SETUP_TIMEOUT_MS = 180_000;
@@ -66,7 +67,7 @@ const SETTLE_TIMEOUT_MS = 10_000;
 export interface ExecuteLocalRunOptions {
   repoPath: string;
   ref?: string;
-  report: string;
+  report?: string;
   regressionPath: string;
   runsDir: string;
   workspacesDir?: string;
@@ -106,11 +107,12 @@ export interface StoredTestEvidence {
   result: StructuredTestResult;
 }
 
-export type LocalRunStatus = Exclude<RunStatus, "RUNNING" | "FIXED_VERIFIED">;
+export type LocalRunStatus = Exclude<RunStatus, "RUNNING" | "FIXED_VERIFIED" | "REVIEW_COMPLETE" | "INCOMPLETE_REVIEW" | "PATCH_PROPOSED">;
 
 export interface LocalRunRecord {
   schemaVersion: 3;
   kind: "local_repository";
+  workflow: "repository_repair";
   runId: string;
   mode: ExecutionMode;
   configHash: string;
@@ -131,6 +133,7 @@ export interface LocalRunRecord {
   };
   repository: {
     name: string;
+    url?: string;
     requestedRef: string;
     commit: string | null;
     regressionPath: string;
@@ -154,15 +157,17 @@ export interface LocalRunRecord {
   changes: { files: string[]; lineCount: number };
   tests: Record<string, StoredTestEvidence>;
   artifacts: LocalRunArtifacts;
+  delivery?: ReturnType<typeof saveDeliverySnapshot>;
 }
 
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function localConfigHash(options: ExecuteLocalRunOptions, patchHash: string | null): string {
+function localConfigHash(options: ExecuteLocalRunOptions & { report: string }, patchHash: string | null): string {
   const canonical = JSON.stringify({
     kind: "local_repository",
+    source: repositoryIdentity(options.repoPath).url,
     mode: options.mode,
     requestedRef: options.ref ?? "HEAD",
     reportHash: sha256(options.report),
@@ -288,8 +293,9 @@ async function settleWithin(operation: Promise<void>, timeoutMs: number, label: 
 }
 
 export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Promise<LocalRunRecord> {
-  const options: ExecuteLocalRunOptions = Object.freeze({
+  const options: ExecuteLocalRunOptions & { report: string } = Object.freeze({
     ...inputOptions,
+    report: inputOptions.report?.trim() ? inputOptions.report : "No security report was supplied. Use the designated existing regression and its observed results to establish the behavior to review and repair. Do not assume a vulnerability or invent missing requirements.",
     budgets: Object.freeze({ ...inputOptions.budgets }),
     model: Object.freeze({ ...inputOptions.model }),
     ...(inputOptions.reviewModel ? { reviewModel: Object.freeze({ ...inputOptions.reviewModel }) } : {}),
@@ -344,6 +350,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
   logger.emit({
     type: "run_start",
     runKind: "local_repository",
+    workflow: "repository_repair",
     configHash: hash,
     mode: options.mode,
     model: options.mode === "live" ? options.model.model : "supplied-patch",
@@ -353,6 +360,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
 
   let budget: RunBudget | undefined;
   let workspace: LocalWorkspace | undefined;
+  let source: Awaited<ReturnType<typeof acquireRepository>> | undefined;
   let runner: ProjectTestRunner | undefined;
   let state: EngineState = "INIT";
   let status: LocalRunStatus = "INFRA_ERROR";
@@ -480,12 +488,16 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
 
     budget = new RunBudget(options.budgets, options.signal);
     transition("CONTEXT");
+    const identity = repositoryIdentity(options.repoPath);
+    const workspacesDir = options.workspacesDir ?? join(resolve(options.runsDir), ".workspaces");
+    if (identity.url) logger.emit({ type: "action_summary", summary: `Fetching public GitHub repository ${identity.name}`, stage: "CONTEXT" });
+    source = await acquireRepository(options.repoPath, options.ref, workspacesDir, budget.signal);
     logger.emit({ type: "action_summary", summary: "Snapshotting the selected repository commit", stage: "CONTEXT" });
     workspace = await prepareLocalWorkspace({
-      repoPath: options.repoPath,
-      ref: options.ref,
+      repoPath: source.repoPath,
+      ref: source.commit ?? options.ref,
       regressionPath: options.regressionPath,
-      workspacesDir: options.workspacesDir ?? join(resolve(options.runsDir), ".workspaces"),
+      workspacesDir,
       signal: budget.signal,
     });
     inputHash = sha256(JSON.stringify({
@@ -494,21 +506,24 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
       regressionHash: workspace.regressionHash,
     }));
     const repository = {
-      kind: "local_git",
-      name: basename(resolve(options.repoPath)),
+      kind: source.url ? "public_github" : "local_git",
+      name: source.name,
+      ...(source.url ? { url: source.url } : {}),
       requestedRef: options.ref ?? "HEAD",
       commit: workspace.commit,
       regressionPath: workspace.regressionPath,
       regressionHash: workspace.regressionHash,
       inputHash,
       files: workspace.files,
-      sourcePath: resolve(options.repoPath),
+      ...(source.url ? { sourceSnapshot: "source" } : { sourcePath: source.repoPath }),
     };
+    if (source.url) saveSourceSnapshot(workspace.baselineDir, artifactDir);
     writeJson(artifacts.repository, repository);
     writePrivate(artifacts.regression, readFileSync(join(workspace.baselineDir, workspace.regressionPath)));
     logger.emit({
       type: "repository_snapshot",
       name: repository.name,
+      ...(source.url ? { url: source.url } : {}),
       commit: repository.commit,
       files: repository.files,
       artifact: artifacts.repository,
@@ -749,10 +764,16 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
       : null;
   } else if (reviewProviderInvoked || repairProviderInvoked) costUsd = null;
 
+  let delivery: ReturnType<typeof saveDeliverySnapshot> | undefined;
+  if (status === "TESTS_PASSED" && source?.url && workspace && diff.changedFiles.length) {
+    try { delivery = saveDeliverySnapshot(workspace, artifactDir, diff.patch, diff.changedFiles); }
+    catch (error) { status = "INFRA_ERROR"; reason = `Delivery snapshot failed: ${errorMessage(error)}`; }
+  }
   transition("DONE");
   const buildRecord = (endedAt: number): LocalRunRecord => ({
       schemaVersion: 3,
       kind: "local_repository",
+      workflow: "repository_repair",
       runId,
       mode: options.mode,
       configHash: hash,
@@ -772,7 +793,8 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
         review: { invoked: reviewProviderInvoked, usageKnown: reviewUsageKnown, ...reviewUsage },
       },
       repository: {
-        name: basename(resolve(options.repoPath)),
+        name: source?.name ?? basename(resolve(options.repoPath)),
+        ...(source?.url ? { url: source.url } : {}),
         requestedRef: options.ref ?? "HEAD",
         commit: workspace?.commit ?? null,
         regressionPath: options.regressionPath,
@@ -796,6 +818,7 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
       changes: { files: [...diff.changedFiles], lineCount: diff.lineCount },
       tests: { ...testEvidence },
       artifacts,
+      ...(delivery ? { delivery } : {}),
     });
   if (!workspace) {
     writeJson(artifacts.repository, {
@@ -822,6 +845,12 @@ export async function executeLocalRun(inputOptions: ExecuteLocalRunOptions): Pro
   } catch (error) {
     if (status === "TESTS_PASSED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
     reason = reason ? `${reason}; workspace cleanup failed: ${errorMessage(error)}` : `workspace cleanup failed: ${errorMessage(error)}`;
+  }
+  try {
+    source?.cleanup();
+  } catch (error) {
+    if (status === "TESTS_PASSED" || status === "NOT_REPRODUCIBLE") status = "INFRA_ERROR";
+    reason = `${reason ? `${reason}; ` : ""}repository cleanup failed: ${errorMessage(error)}`;
   }
   budget?.dispose();
 

@@ -3,12 +3,14 @@ import { DEFAULT_BUDGETS, type HarnessEvent } from "@vouch/protocol";
 
 const engine = vi.hoisted(() => ({
   executeLocalRun: vi.fn(),
+  executeRepositoryReview: vi.fn(),
   executeRun: vi.fn(),
   loadTask: vi.fn(),
 }));
+const sandbox = vi.hoisted(() => ({ readBoundedRegularFile: vi.fn() }));
 
 vi.mock("@vouch/engine", () => engine);
-vi.mock("@vouch/sandbox", () => ({ readBoundedRegularFile: () => Buffer.from("supplied report") }));
+vi.mock("@vouch/sandbox", () => sandbox);
 
 const originalArgv = process.argv;
 const originalExitCode = process.exitCode;
@@ -16,6 +18,7 @@ const originalExitCode = process.exitCode;
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  sandbox.readBoundedRegularFile.mockReturnValue(Buffer.from("supplied report"));
   process.exitCode = undefined;
   process.argv = ["node", "vouch", "run", "--repo", "/tmp/repository", "--report", "/tmp/report.txt",
     "--regression", "tests/security.test.ts", "--mode", "scripted", "--patch", "/tmp/repair.diff"];
@@ -28,6 +31,113 @@ afterEach(() => {
 });
 
 describe("run CLI result", () => {
+  it.each([["REVIEW_COMPLETE", 0], ["INCOMPLETE_REVIEW", 1]])(
+    "routes a GitHub URL and prompt without reading a report, exiting %s correctly",
+    async (status, exitCode) => {
+      const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+      const repo = "https://github.com/example/project.git/";
+      process.argv = ["node", "vouch", "run", "--repo", repo, "--prompt", "Review authorization checks."];
+      engine.executeRepositoryReview.mockResolvedValue({
+        runId: "review-run", status, elapsedMs: 10, costUsd: null,
+        verification: { scope: "source_review", independentGrader: false },
+        artifacts: { dir: "/tmp/run", record: "/tmp/run/record.json", events: "/tmp/run/events.jsonl", reviewSummary: "/tmp/run/review-summary.txt" },
+      });
+
+      await import("./index.js");
+      await vi.waitFor(() => expect(stdout).toHaveBeenCalled());
+
+      expect(engine.executeRepositoryReview).toHaveBeenCalledWith(expect.objectContaining({
+        repoPath: repo, prompt: "Review authorization checks.", report: undefined, ref: "HEAD",
+      }));
+      expect(engine.executeLocalRun).not.toHaveBeenCalled();
+      expect(sandbox.readBoundedRegularFile).not.toHaveBeenCalled();
+      const output = stdout.mock.calls.flat().join("");
+      expect(output).toContain("verification=source_review independentGrader=false");
+      expect(output).toContain("review=/tmp/run/review-summary.txt");
+      expect(output).not.toContain("  patch=");
+      expect(process.exitCode).toBe(exitCode);
+    },
+  );
+
+  it("keeps regression repair available for a GitHub URL without a report", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const repo = "https://github.com/example/project";
+    process.argv = ["node", "vouch", "run", "--repo", repo, "--regression", "tests/test_security.py"];
+    engine.executeLocalRun.mockResolvedValue({
+      runId: "repair-run", status: "NOT_REPRODUCIBLE", elapsedMs: 10, costUsd: null,
+      verification: { scope: "repository_tests", independentGrader: false },
+      artifacts: { dir: "/tmp/run", patch: "/tmp/run/patch.diff", record: "/tmp/run/record.json", events: "/tmp/run/events.jsonl" },
+    });
+
+    await import("./index.js");
+    await vi.waitFor(() => expect(stdout).toHaveBeenCalled());
+
+    expect(engine.executeLocalRun).toHaveBeenCalledWith(expect.objectContaining({
+      repoPath: repo, report: undefined, regressionPath: "tests/test_security.py",
+    }));
+    expect(engine.executeRepositoryReview).not.toHaveBeenCalled();
+    expect(sandbox.readBoundedRegularFile).not.toHaveBeenCalled();
+  });
+
+  it("routes --fix to source remediation and labels the successful proposal as untested", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    process.argv = ["node", "vouch", "run", "--repo", "https://github.com/example/project",
+      "--prompt", "Correct justified authorization defects.", "--fix"];
+    engine.executeRepositoryReview.mockResolvedValue({
+      runId: "source-patch-run", status: "PATCH_PROPOSED", elapsedMs: 10, costUsd: null,
+      verification: { scope: "source_patch", independentGrader: false, testsRun: false },
+      artifacts: {
+        dir: "/tmp/run", patch: "/tmp/run/patch.diff", record: "/tmp/run/record.json",
+        events: "/tmp/run/events.jsonl", reviewSummary: "/tmp/run/review-summary.txt",
+      },
+    });
+
+    await import("./index.js");
+    await vi.waitFor(() => expect(stdout).toHaveBeenCalled());
+
+    expect(engine.executeRepositoryReview).toHaveBeenCalledWith(expect.objectContaining({
+      remediate: true, prompt: "Correct justified authorization defects.", report: undefined,
+    }));
+    expect(engine.executeLocalRun).not.toHaveBeenCalled();
+    expect(sandbox.readBoundedRegularFile).not.toHaveBeenCalled();
+    const output = stdout.mock.calls.flat().join("");
+    expect(output).toContain("status=PATCH_PROPOSED");
+    expect(output).toContain("verification=source_patch independentGrader=false");
+    expect(output).toContain("testsRun=false");
+    expect(output).toContain("patch=/tmp/run/patch.diff");
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("combines an optional prompt with the supplied report for regression repair", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    process.argv.push("--prompt", "Preserve the existing session behavior.");
+    engine.executeLocalRun.mockResolvedValue({
+      runId: "repair-run", status: "NOT_REPRODUCIBLE", elapsedMs: 10, costUsd: null,
+      verification: { scope: "repository_tests", independentGrader: false },
+      artifacts: { dir: "/tmp/run", patch: "/tmp/run/patch.diff", record: "/tmp/run/record.json", events: "/tmp/run/events.jsonl" },
+    });
+
+    await import("./index.js");
+    await vi.waitFor(() => expect(stdout).toHaveBeenCalled());
+
+    expect(sandbox.readBoundedRegularFile).toHaveBeenCalledWith("/tmp/report.txt", 200_000, "report");
+    expect(engine.executeLocalRun).toHaveBeenCalledWith(expect.objectContaining({
+      report: "supplied report\n\nPreserve the existing session behavior.",
+    }));
+  });
+
+  it("rejects an explicitly supplied empty report before either workflow starts", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    sandbox.readBoundedRegularFile.mockReturnValue(Buffer.from(" \n"));
+
+    await import("./index.js");
+    await vi.waitFor(() => expect(process.exitCode).toBe(1));
+
+    expect(stderr.mock.calls.flat().join("")).toContain("the supplied report is empty");
+    expect(engine.executeLocalRun).not.toHaveBeenCalled();
+    expect(engine.executeRepositoryReview).not.toHaveBeenCalled();
+  });
+
   it("streams progress to stderr before the run resolves while keeping the final summary on stdout", async () => {
     const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);

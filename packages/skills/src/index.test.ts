@@ -4,8 +4,14 @@ import {
   LOCAL_REPAIR_GUIDANCE,
   LOCAL_REVIEW_GUIDANCE,
   LOCAL_SKILLS,
+  REPOSITORY_REVIEW_GUIDANCE,
+  REPOSITORY_REVIEW_SKILLS,
+  SOURCE_REPAIR_GUIDANCE,
+  SOURCE_REPAIR_SKILLS,
   systemPromptLocalRepair,
   systemPromptLocalReview,
+  systemPromptRepositoryRepair,
+  systemPromptRepositoryReview,
 } from "./index.js";
 
 describe("local defensive skills", () => {
@@ -54,5 +60,67 @@ describe("local defensive skills", () => {
     expect(systemPromptLocalReview()).toContain("Your available skill is evidence-review");
     expect(systemPromptLocalReview()).not.toContain("minimal-repair");
     expect(systemPromptLocalRepair()).toContain("evidence-review, minimal-repair, and regression-verification");
+  });
+});
+
+describe("source review and remediation skills", () => {
+  test("separates review specializations from source-edit capabilities", () => {
+    expect(REPOSITORY_REVIEW_SKILLS.map(skill => skill.id)).toEqual([
+      "source-security-review", "auth-boundary-review", "config-dependency-review", "remediation-planning",
+    ]);
+    expect(SOURCE_REPAIR_SKILLS.map(skill => skill.id)).toEqual([
+      "source-security-review", "source-remediation", "change-validation",
+    ]);
+    expect(SOURCE_REPAIR_SKILLS[0]).toBe(REPOSITORY_REVIEW_SKILLS[0]);
+    for (const catalog of [REPOSITORY_REVIEW_SKILLS, SOURCE_REPAIR_SKILLS]) {
+      expect(new Set(catalog.map(skill => skill.id)).size).toBe(catalog.length);
+      for (const skill of catalog) {
+        expect(skill.roles).toEqual(["blue"]);
+        expect(skill.version).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(skill.instructions.length).toBeGreaterThan(skill.description.length);
+      }
+    }
+    expect(LOCAL_SKILLS.map(skill => skill.id)).not.toContain("source-remediation");
+  });
+
+  test("requires source observations and accounts for missing deployment or advisory evidence", () => {
+    const auth = REPOSITORY_REVIEW_SKILLS.find(skill => skill.id === "auth-boundary-review")!.instructions;
+    expect(auth).toContain("checks inherited from routers or shared helpers");
+    expect(auth).toContain("unread middleware and deployment assumptions as uncertainty");
+    const dependencies = REPOSITORY_REVIEW_SKILLS.find(skill => skill.id === "config-dependency-review")!.instructions;
+    expect(dependencies).toContain("version alone is not proof of a vulnerability");
+    expect(dependencies).toContain("Never print credential values");
+    expect(dependencies).toContain("Do not install dependencies, fetch advisories");
+    const planning = REPOSITORY_REVIEW_SKILLS.find(skill => skill.id === "remediation-planning")!.instructions;
+    expect(planning).toContain("without creating test code or claiming any check was executed");
+  });
+
+  test.each([systemPromptRepositoryReview, systemPromptRepositoryRepair])("requires real findings and bounded public progress", (prompt) => {
+    const value = prompt();
+    expect(value).toContain("report_finding({id,title,severity,confidence,evidence,summary,recommendation})");
+    expect(value).toContain("severity must be low, medium, high, critical, or info");
+    expect(value).toContain("confidence must be confirmed or potential");
+    expect(value).toContain("only repository-relative paths observed through successful repository tools");
+    expect(value).toContain("Before repository tools, call use_skill and then report_progress");
+    expect(value).toContain("Use at most six plan steps");
+    expect(value).toContain("not private internal deliberation or raw chain-of-thought");
+    expect(value).toContain("Before finishing, call report_progress");
+    expect(value).toContain("do not invent a finding");
+  });
+
+  test("binds source writes to recorded findings and final diff inspection without assumed tests", () => {
+    const repair = systemPromptRepositoryRepair();
+    expect(repair).toContain("write_file only while source-remediation is active and a confirmed finding has been recorded");
+    expect(repair).toContain("No shell, code execution, test execution, or network tools are available");
+    expect(repair).toContain("Existing tests, configuration, manifests, lockfiles, setup files, and hidden files are protected");
+    expect(repair).toContain("After the final edit, load change-validation and call inspect_diff");
+    const validation = SOURCE_REPAIR_SKILLS.find(skill => skill.id === "change-validation")!.instructions;
+    expect(validation).toContain("testsRun:false means no tests ran");
+    expect(validation).toContain("An earlier diff does not validate a later edit");
+    expect(validation).toContain("do not edit files");
+    expect(systemPromptRepositoryReview()).toContain("result scope is source_review");
+    expect(systemPromptRepositoryReview()).not.toContain("source-remediation");
+    expect(REPOSITORY_REVIEW_GUIDANCE.version).toBe("1.1.0");
+    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.0.0");
   });
 });

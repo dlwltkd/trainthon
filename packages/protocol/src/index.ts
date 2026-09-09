@@ -47,6 +47,9 @@ export type RunStatus =
   | "RUNNING"
   | "FIXED_VERIFIED"
   | "TESTS_PASSED"
+  | "REVIEW_COMPLETE"
+  | "INCOMPLETE_REVIEW"
+  | "PATCH_PROPOSED"
   | "NOT_REPRODUCIBLE"
   | "FAILED_NO_FIX"
   | "BROKE_FUNCTION"
@@ -84,6 +87,7 @@ export interface BaseEvent {
 export interface RunStartEvent extends BaseEvent {
   type: "run_start";
   runKind: "benchmark" | "local_repository";
+  workflow?: "repository_review" | "repository_repair" | "repository_remediation";
   configHash: string;
   taskId?: string;
   mode?: ExecutionMode;
@@ -186,6 +190,7 @@ export interface AgentUpdateEvent extends BaseEvent {
 export interface RepositoryEvent extends BaseEvent {
   type: "repository_snapshot";
   name: string;
+  url?: string;
   commit: string;
   files: string[];
   artifact: string;
@@ -198,6 +203,20 @@ export interface FileChangeEvent extends BaseEvent {
   agentRole: AgentRole;
   patch: string;
   artifact: string;
+}
+
+export interface FindingReportedEvent extends BaseEvent {
+  type: "finding_reported";
+  findingId: string;
+  title: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  confidence: "confirmed" | "potential";
+  evidence: string[];
+  summary: string;
+  recommendation: string;
+  callId: string;
+  agentRole: AgentRole;
+  stage: EngineState;
 }
 
 export interface TestRunEvent extends BaseEvent {
@@ -279,6 +298,7 @@ export type HarnessEvent =
   | AgentSummaryEvent
   | GuidanceEvent
   | SkillCallEvent
+  | FindingReportedEvent
   | AgentUpdateEvent
   | RepositoryEvent
   | FileChangeEvent

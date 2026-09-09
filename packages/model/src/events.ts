@@ -24,6 +24,8 @@ function actionSummary(name: string, args: unknown): string {
     case "apply_supplied_patch": return "Applying the supplied source patch";
     case "use_skill": return "Loading selected skill instructions";
     case "report_progress": return "Publishing a decision summary and plan";
+    case "report_finding": return "Recording a source-backed finding";
+    case "inspect_diff": return "Inspecting the candidate patch";
     default: return `Running ${name}`;
   }
 }

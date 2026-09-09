@@ -1,11 +1,14 @@
 import { z, type ZodType } from "zod";
-import type { EventInput } from "@vouch/protocol";
+import type { EventInput, FindingReportedEvent } from "@vouch/protocol";
 import type { AgentTool } from "@vouch/model";
-import { createAgentTrace, type AgentTrace } from "./agent-trace.js";
+import { createAgentTrace, type AgentTrace, type TraceWorkspace } from "./agent-trace.js";
+import { REPOSITORY_REVIEW_SKILLS, SOURCE_REPAIR_SKILLS } from "@vouch/skills";
 import {
   listDirTool,
   readFileTool,
   writeLocalSource,
+  isLocalSourcePath,
+  captureLocalChanges,
   type LocalWorkspace,
   type ProjectTestRunner,
   type StructuredTestResult,
@@ -51,7 +54,7 @@ class SerialToolQueue {
   }
 }
 
-function literalSearch(workspace: LocalWorkspace, query: string) {
+function literalSearch(workspace: TraceWorkspace, query: string) {
   const hits: Array<{ file: string; line: number; text: string }> = [];
   for (const file of listDirTool(workspace.dir)) {
     if (file.endsWith("/")) continue;
@@ -68,7 +71,7 @@ function literalSearch(workspace: LocalWorkspace, query: string) {
 }
 
 function readTools(
-  workspace: LocalWorkspace,
+  workspace: TraceWorkspace,
   signal: AbortSignal,
   queue: SerialToolQueue,
   trace: AgentTrace,
@@ -115,6 +118,55 @@ export function buildLocalReviewTools(workspace: LocalWorkspace, signal: AbortSi
   const queue = new SerialToolQueue();
   const trace = createAgentTrace({ workspace, signal, onEvent, role: "red", enqueue: operation => queue.run(operation) });
   return [...trace.tools, ...readTools(workspace, signal, queue, trace)];
+}
+
+export function buildSourceReviewTools(workspace: TraceWorkspace, signal: AbortSignal, onEvent: (event: EventInput) => void, remediate = false) {
+  const queue = new SerialToolQueue();
+  const stage = remediate ? "PATCH" : "REVIEW";
+  const trace = createAgentTrace({ workspace, signal, onEvent, role: "blue", stage, skills: remediate ? SOURCE_REPAIR_SKILLS : REPOSITORY_REVIEW_SKILLS, enqueue: operation => queue.run(operation) });
+  const findings = new Map<string, Omit<FindingReportedEvent, "runId" | "seq" | "ts">>();
+  const changeFindings = new Map<string, string[]>();
+  let inspectedPatch: string | undefined;
+  const findingSchema = z.object({
+    id: z.string().regex(/^[a-zA-Z0-9_-]{1,60}$/), title: z.string().trim().min(1).max(180),
+    severity: z.enum(["info", "low", "medium", "high", "critical"]), confidence: z.enum(["confirmed", "potential"]),
+    evidence: z.array(z.string().min(1).max(500)).min(1).max(6),
+    summary: z.string().trim().min(1).max(1500), recommendation: z.string().trim().min(1).max(1500),
+  }).strict();
+  const tools: AgentTool[] = [...trace.tools, ...readTools(workspace, signal, queue, trace), {
+    name: "report_finding", description: "Record a source-backed defensive finding. Evidence contains exact paths already read. Confirmed means source-supported, not runtime-tested. Up to 30 distinct findings; reuse an ID to update it.", schema: findingSchema,
+    execute: (args, context) => queue.run(() => {
+      signal.throwIfAborted(); trace.requireReady();
+      const finding = findingSchema.parse(args);
+      trace.assertEvidence(finding.evidence);
+      if (!context?.callId) throw new Error("a logged call is required");
+      if (findings.size >= 30 && !findings.has(finding.id)) throw new Error("finding limit reached");
+      const { id, ...details } = finding;
+      const event = { type: "finding_reported", findingId: id, ...details, callId: context.callId, agentRole: "blue", stage } as const;
+      findings.set(id, event); onEvent(event);
+      return { recorded: true, findingId: id };
+    }),
+  }];
+  if (remediate) {
+    const repair = workspace as LocalWorkspace;
+    tools.push(defineTool("write_file", "Apply a minimal application source change for a confirmed finding. Provide findingId when adding a file or changing a related file outside the finding's evidence. Requires source-remediation skill. Tests and configuration are protected.", z.object({ path: z.string().min(1).max(500), content: z.string().max(2_000_000), findingId: z.string().max(60).optional() }), ({ path, content, findingId }) => queue.run(() => {
+      signal.throwIfAborted(); trace.requireReady();
+      if (trace.activeSkill() !== "source-remediation") throw new Error("load source-remediation before editing");
+      if (!isLocalSourcePath(repair, path)) throw new Error(`only application source files may be edited: ${path}`);
+      const related = [...findings.values()].filter(f => f.confidence === "confirmed" && f.severity !== "info" && (findingId ? f.findingId === findingId : f.evidence.includes(path)));
+      if (!related.length) throw new Error("record a confirmed source-backed finding for this file or supply its findingId before editing");
+      writeLocalSource(repair, path, content); trace.observe([path], true); inspectedPatch = undefined;
+      changeFindings.set(path, related.map(f => f.findingId));
+      return { ok: true, path, findingIds: changeFindings.get(path) };
+    })));
+    tools.push(defineTool("inspect_diff", "Inspect the exact candidate diff and enforce protected file boundaries. Does not run tests or prove the patch correct. Requires change-validation skill.", z.object({}), () => queue.run(async () => {
+      signal.throwIfAborted(); trace.requireReady();
+      if (trace.activeSkill() !== "change-validation") throw new Error("load change-validation before inspecting the final diff");
+      const diff = await captureLocalChanges(repair); signal.throwIfAborted(); inspectedPatch = diff.patch;
+      return { ...diff, checks: { protectedFilesUnchanged: true, testsRun: false } };
+    })));
+  }
+  return { tools, drain: () => queue.drain(), findings: () => [...findings.values()], inspectedPatch: () => inspectedPatch, changeFindings: () => Object.fromEntries(changeFindings) };
 }
 
 export interface LocalRepairToolset {

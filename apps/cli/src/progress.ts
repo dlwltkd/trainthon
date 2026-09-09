@@ -79,6 +79,10 @@ export function createRunProgress(
         print(`${role}skill reason: ${label(event.reason)}`);
         activity = `${role}using ${label(event.skillId)}`;
         break;
+      case "finding_reported":
+        print(`${role}finding [${event.severity}/${event.confidence}]: ${label(event.title)}`);
+        print(`${role}evidence: ${event.evidence.map(label).join(", ")}`);
+        break;
       case "agent_update":
         print(`${role}decision: ${label(event.summary)}`);
         if (event.evidence.length) print(`${role}evidence: ${event.evidence.map(label).join(", ")}`);

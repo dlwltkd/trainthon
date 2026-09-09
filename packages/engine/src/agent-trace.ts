@@ -1,13 +1,21 @@
 import { z } from "zod";
 import { posix } from "node:path";
-import type { EventInput } from "@vouch/protocol";
+import type { EngineState, EventInput } from "@vouch/protocol";
 import type { AgentTool } from "@vouch/model";
-import { LOCAL_SKILLS, getLocalSkill } from "@vouch/skills";
+import { LOCAL_SKILLS, type LocalSkill } from "@vouch/skills";
 import { isLocalSourcePath, type LocalWorkspace } from "@vouch/sandbox";
 
+export interface TraceWorkspace {
+  dir: string;
+  files: string[];
+  regressionPath?: string;
+}
+
 interface TraceOptions {
-  workspace: LocalWorkspace;
+  workspace: TraceWorkspace;
   role: "red" | "blue";
+  stage?: EngineState;
+  skills?: readonly LocalSkill[];
   signal: AbortSignal;
   onEvent: (event: EventInput) => void;
   enqueue: <T>(operation: () => T | Promise<T>) => Promise<T>;
@@ -18,7 +26,7 @@ const skillSchema = z.object({ skillId: text(80), reason: text(300) }).strict();
 const updateSchema = z.object({
   summary: text(500),
   nextAction: text(200),
-  evidence: z.array(text(500)).max(6),
+  evidence: z.array(text(500)).max(6).describe("Exact repository-relative file paths only, for example [\"src/app.ts\"]. Use [] when empty, never [\"[]\"]. No line numbers, descriptions, or intended future reads."),
   plan: z.array(z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]{1,40}$/),
     title: text(120),
@@ -27,11 +35,12 @@ const updateSchema = z.object({
 }).strict();
 
 export function createAgentTrace(options: TraceOptions) {
-  const observed = new Set([options.workspace.regressionPath]);
+  const observed = new Set(options.workspace.regressionPath ? [options.workspace.regressionPath] : []);
+  const skills = options.skills ?? LOCAL_SKILLS;
   const files = new Set(options.workspace.files);
   let selectedSkill: string | undefined;
   let reported = false;
-  const stage = options.role === "red" ? "REPRODUCE" : "PATCH";
+  const stage = options.stage ?? (options.role === "red" ? "REPRODUCE" : "PATCH");
   const context = { agentRole: options.role, stage } as const;
   const requireCall = (context?: { callId: string }): string => {
     if (!context?.callId) throw new Error("trace tools require a logged call context");
@@ -40,13 +49,13 @@ export function createAgentTrace(options: TraceOptions) {
   const tools: AgentTool[] = [
     {
       name: "use_skill",
-      description: `Load a skill and explain its relevance. Available: ${LOCAL_SKILLS.filter(skill => skill.roles.includes(options.role)).map(skill => `${skill.id}: ${skill.description}`).join("; ")}`,
+      description: `Load a skill and explain its relevance. Available: ${skills.filter(skill => skill.roles.includes(options.role)).map(skill => `${skill.id}: ${skill.description}`).join("; ")}`,
       schema: skillSchema,
       execute: (args, call) => options.enqueue(() => {
         options.signal.throwIfAborted();
         const { skillId, reason } = skillSchema.parse(args);
         const callId = requireCall(call);
-        const skill = getLocalSkill(skillId);
+        const skill = skills.find(skill => skill.id === skillId);
         if (!skill || !skill.roles.includes(options.role)) throw new Error("skill is not available to this role");
         options.onEvent({ type: "skill_call", skillId, version: skill.version, reason, callId, ...context });
         selectedSkill = skillId;
@@ -67,7 +76,7 @@ export function createAgentTrace(options: TraceOptions) {
         if (update.plan.filter(step => step.status === "in_progress").length > 1) throw new Error("only one plan step may be in progress");
         for (const path of update.evidence) {
           if (!files.has(path) || !observed.has(path)) {
-            throw new Error(`Evidence must reference an observed repository file: ${path}. Retry report_progress with evidence: [] to record your plan, then read the files. Put intended reads in nextAction or plan. The supplied regression (${options.workspace.regressionPath}) may also be cited.`);
+            throw new Error(`Evidence must reference an observed repository file: ${path}. Use exact paths only, without descriptions. Retry report_progress with an empty evidence array to record your plan, then read the files. Put intended reads in nextAction or plan.${options.workspace.regressionPath ? ` The supplied regression (${options.workspace.regressionPath}) may also be cited.` : ""}`);
           }
         }
         options.onEvent({ type: "agent_update", ...update, callId, ...context });
@@ -78,10 +87,17 @@ export function createAgentTrace(options: TraceOptions) {
   ];
   return {
     tools,
+    activeSkill: () => selectedSkill,
+    assertEvidence(paths: string[]) {
+      if (!paths.length) throw new Error("at least one observed source file is required");
+      for (const path of paths) {
+        if (!files.has(path) || !observed.has(path)) throw new Error(`evidence is not an observed file: ${path}`);
+      }
+    },
     observe(paths: string[], created = false) {
       for (const input of paths) {
         const path = posix.normalize(input);
-        if (created && isLocalSourcePath(options.workspace, path)) files.add(path);
+        if (created && "protectedPaths" in options.workspace && isLocalSourcePath(options.workspace as LocalWorkspace, path)) files.add(path);
         if (files.has(path)) observed.add(path);
       }
     },

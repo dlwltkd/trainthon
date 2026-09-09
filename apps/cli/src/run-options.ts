@@ -18,7 +18,7 @@ interface CommonOptions {
 
 export type RunOptions = CommonOptions & (
   | { kind: "task"; taskId: string; condition: Condition }
-  | { kind: "repository"; repoPath: string; reportPath: string; regressionPath: string; ref: string; patchPath?: string; reviewModel?: ModelSpec }
+  | { kind: "repository"; repoPath: string; reportPath?: string; regressionPath?: string; prompt?: string; remediate?: boolean; ref: string; patchPath?: string; reviewModel?: ModelSpec }
 );
 
 function value(flags: Flags, key: string): string | undefined {
@@ -48,20 +48,26 @@ export interface LiveRoleModels {
   red: ModelSpec;
 }
 
-/** Resolve the exact live role configuration without reading or exposing key values. */
-export function resolveLiveRoleModels(
+export function resolveLiveBlueModel(
   flags: Flags,
   env: NodeJS.ProcessEnv = process.env,
-): LiveRoleModels {
+): ModelSpec {
   const blueModel = configuredValue(flags, "model", env, "VOUCH_BLUE_MODEL")
     || PROVIDERS.openai.defaultModel;
-  const blue: ModelSpec = {
+  return {
     model: blueModel,
     provider: provider(configuredValue(flags, "provider", env, "VOUCH_BLUE_PROVIDER"), blueModel, "Blue"),
     baseURL: configuredValue(flags, "base-url", env, "VOUCH_BLUE_BASE_URL"),
     apiKeyEnv: configuredValue(flags, "api-key-env", env, "VOUCH_BLUE_API_KEY_ENV"),
   };
+}
 
+/** Resolve the exact live role configuration without reading or exposing key values. */
+export function resolveLiveRoleModels(
+  flags: Flags,
+  env: NodeJS.ProcessEnv = process.env,
+): LiveRoleModels {
+  const blue = resolveLiveBlueModel(flags, env);
   const redModel = configuredValue(flags, "red-model", env, "VOUCH_RED_MODEL")
     || ROUTEWAY_GLM_FLASH_UNCENSORED;
   const redProvider = configuredValue(flags, "red-provider", env, "VOUCH_RED_PROVIDER");
@@ -80,18 +86,22 @@ export function resolveLiveRoleModels(
 
 export function parseRunOptions(flags: Flags, env: NodeJS.ProcessEnv = process.env): RunOptions {
   const allowed = new Set([
-    "task", "condition", "repo", "report", "regression", "ref", "mode",
+    "task", "condition", "repo", "report", "regression", "prompt", "fix", "ref", "mode",
     "model", "provider", "base-url", "api-key-env",
     "red-model", "red-provider", "red-base-url", "red-api-key-env",
     "patch", "seed",
   ]);
   for (const key of Object.keys(flags)) {
     if (!allowed.has(key)) throw new Error(`unknown flag: --${key}`);
-    value(flags, key);
+    if (key === "fix") {
+      if (typeof flags[key] !== "boolean") throw new Error("--fix is a boolean flag; use --fix without a value");
+    } else {
+      value(flags, key);
+    }
   }
   const taskId = value(flags, "task");
   const repoPath = value(flags, "repo");
-  if (Boolean(taskId) === Boolean(repoPath)) throw new Error("provide exactly one of --task <id> or --repo <path>");
+  if (Boolean(taskId) === Boolean(repoPath)) throw new Error("provide exactly one of --task <id> or --repo <path|GitHub URL>");
   const mode = value(flags, "mode") ?? "live";
   if (mode !== "live" && mode !== "scripted") throw new Error("--mode must be live or scripted");
   const seed = Number(value(flags, "seed") ?? "1");
@@ -107,12 +117,12 @@ export function parseRunOptions(flags: Flags, env: NodeJS.ProcessEnv = process.e
   if (taskId) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(taskId)) throw new Error("invalid benchmark task ID");
     for (const key of [
-      "report", "regression", "ref", "patch", "base-url", "api-key-env",
+      "report", "regression", "prompt", "fix", "ref", "patch", "base-url", "api-key-env",
       "red-model", "red-provider", "red-base-url", "red-api-key-env",
     ]) {
       if (flags[key] !== undefined) throw new Error(`--${key} is only supported with --repo`);
     }
-    if (mode !== "scripted") throw new Error("benchmark fixtures require --mode scripted; for live repair use --repo with a supplied --report and --regression");
+    if (mode !== "scripted") throw new Error("benchmark fixtures require --mode scripted; use --repo with --prompt for live review or --regression for live repair");
     const condition = value(flags, "condition");
     if (condition !== "A" && condition !== "B" && condition !== "C") throw new Error("--condition must be A, B, or C");
     return { kind: "task", taskId, condition, mode, model: { model: "scripted", provider: "compatible" }, seed };
@@ -120,13 +130,29 @@ export function parseRunOptions(flags: Flags, env: NodeJS.ProcessEnv = process.e
   if (flags["condition"] !== undefined) throw new Error("--condition is only supported with --task");
   const reportPath = value(flags, "report");
   const regressionPath = value(flags, "regression");
-  if (!reportPath || !regressionPath) throw new Error("--repo requires --report <file> and --regression <repository-relative path>");
+  const prompt = value(flags, "prompt");
+  if (reportPath !== undefined && !reportPath.trim()) throw new Error("--report requires a non-empty file path");
+  if (prompt !== undefined && !prompt.trim()) throw new Error("--prompt requires non-empty review instructions");
+  if (regressionPath !== undefined && !regressionPath.trim()) throw new Error("--regression requires a repository-relative path");
   const patchPath = value(flags, "patch");
+  if (!regressionPath) {
+    if (!prompt) throw new Error("--repo requires --prompt <review instructions> or --regression <repository-relative path>");
+    if (mode !== "live") throw new Error("prompt-based repository review requires --mode live");
+    for (const key of ["patch", "red-model", "red-provider", "red-base-url", "red-api-key-env"]) {
+      if (flags[key] !== undefined) throw new Error(`--${key} is only supported with --regression`);
+    }
+    return {
+      kind: "repository", repoPath: repoPath!, reportPath, prompt, remediate: flags["fix"] === true,
+      ref: value(flags, "ref") ?? "HEAD", mode,
+      model: resolveLiveBlueModel(flags, env), seed,
+    };
+  }
+  if (flags["fix"] !== undefined) throw new Error("--fix cannot be combined with --regression; regression runs already permit source repair");
   if (mode === "scripted" && !patchPath) throw new Error("scripted local runs require an explicit --patch <file>");
   if (mode === "live" && patchPath) throw new Error("--patch is only supported in scripted mode");
   const liveModels = mode === "live" ? resolveLiveRoleModels(flags, env) : undefined;
   return {
-    kind: "repository", repoPath: repoPath!, reportPath, regressionPath,
+    kind: "repository", repoPath: repoPath!, reportPath, regressionPath, prompt,
     ref: value(flags, "ref") ?? "HEAD", mode,
     model: liveModels?.blue ?? { model: "scripted", provider: "compatible" },
     seed, patchPath, reviewModel: liveModels?.red,
