@@ -30,7 +30,8 @@ export interface ExecuteRepositoryReviewOptions {
 }
 
 class IncompleteSourceReviewError extends Error {}
-const REQUEST_POLICY = Object.freeze({ maxRetries: 2, timeoutMs: 90_000, transport: "stream" as const, progressEverySteps: 6, contextCheckpointBytes: 64_000 });
+const REQUEST_POLICY = Object.freeze({ maxRetries: 2, timeoutMs: 90_000, transport: "stream" as const, contextCheckpointBytes: 64_000 });
+const SOURCE_CONTEXT_POLICY = Object.freeze({ maxBytes: 192_000, maxFiles: 8, selection: "single-file-or-prompt-paths" });
 const ASSESSMENT_POLICY = "independent-source-v1";
 
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -53,7 +54,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   const startedAt = Date.now();
   let configHash = "invalid-config";
   let configError: unknown;
-  try { configHash = hash(JSON.stringify({ workflow, repo: options.repoPath, ref: options.ref ?? "HEAD", prompt: options.prompt, report: options.report ?? "", model: canonicalizeModelSpec(options.model), ...(options.reviewModel ? { reviewModel: canonicalizeModelSpec(options.reviewModel) } : {}), budgets: options.budgets, requestPolicy: REQUEST_POLICY, assessmentPolicy: ASSESSMENT_POLICY, seed: options.seed })); }
+  try { configHash = hash(JSON.stringify({ workflow, repo: options.repoPath, ref: options.ref ?? "HEAD", prompt: options.prompt, report: options.report ?? "", model: canonicalizeModelSpec(options.model), ...(options.reviewModel ? { reviewModel: canonicalizeModelSpec(options.reviewModel) } : {}), budgets: options.budgets, requestPolicy: REQUEST_POLICY, sourceContextPolicy: SOURCE_CONTEXT_POLICY, assessmentPolicy: ASSESSMENT_POLICY, seed: options.seed })); }
   catch (error) { configError = error; }
   logger.emit({ type: "run_start", runKind: "local_repository", workflow, configHash, mode: "live", model: options.model.model, seed: options.seed, budgets: options.budgets });
   let budget: RunBudget | undefined;
@@ -114,16 +115,23 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     logger.emit({ type: "repository_snapshot", name: source.name, ...(source.url ? { url: source.url } : {}), commit: workspace.commit, files: workspace.files, artifact: artifacts.repository });
     transition("REVIEW");
     const prompt = `## User task\n${options.prompt}\n\n## Optional supplied report\n${options.report?.slice(0, 50_000) || "No report supplied."}\n\n## Pinned repository\n${source.name} @ ${workspace.commit}\n\n## Available files\n${workspace.files.join("\n").slice(0, 60_000)}`;
+    const supplyContext = (tools: ReturnType<typeof buildSourceReviewTools>, role: "red" | "blue") => {
+      const context = tools.sourceContext(options.prompt, SOURCE_CONTEXT_POLICY.maxBytes, SOURCE_CONTEXT_POLICY.maxFiles);
+      writeJson(join(dir, `source-context-${role}.json`), { policy: SOURCE_CONTEXT_POLICY, files: context.files });
+      if (context.files.length) logger.emit({ type: "action_summary", agentRole: role, stage, summary: `Harness supplied complete source for ${context.files.length} file(s) (${context.files.reduce((sum, file) => sum + file.bytes, 0).toLocaleString("en-US")} bytes) in the initial context: ${context.files.map(file => file.path).join(", ")}.` });
+      return context.text;
+    };
     let handoff = "";
     if (options.reviewModel && reviewer) {
       budget.check();
       logger.emit({ type: "guidance_configured", ...REPOSITORY_REVIEW_GUIDANCE, agentRole: "red" });
       logger.emit({ type: "role_assigned", role: "red", runner: "source-review", provider: options.reviewModel.provider, model: options.reviewModel.model });
       reviewToolset = buildSourceReviewTools({ ...workspace, dir: workspace.baselineDir }, budget.signal, emitAgentEvent, false, "red");
+      const reviewContext = supplyContext(reviewToolset, "red");
       status = "INFRA_ERROR"; invoked = true;
       try {
         const reviewed = await reviewer.run({
-          system: systemPromptRepositoryReview("red"), prompt, tools: reviewToolset.tools,
+          system: systemPromptRepositoryReview("red"), prompt: prompt + reviewContext, tools: reviewToolset.tools,
           budgets: options.budgets, budget, model: options.reviewModel.model, seed: options.seed, role: "red", stage, requestPolicy: REQUEST_POLICY,
           onEvent: emitAgentEvent,
         });
@@ -153,11 +161,12 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
     logger.emit({ type: "guidance_configured", ...(options.remediate ? SOURCE_REPAIR_GUIDANCE : REPOSITORY_REVIEW_GUIDANCE), agentRole: "blue" });
     logger.emit({ type: "role_assigned", role: "blue", runner: options.remediate ? "source-remediation" : "source-review", provider: options.model.provider, model: options.model.model });
     toolset = buildSourceReviewTools(workspace, budget.signal, emitAgentEvent, options.remediate, "blue", reviewToolset?.findings().map(finding => finding.findingId));
+    const repairContext = supplyContext(toolset, "blue");
     status = "INFRA_ERROR";
     budget.check(); invoked = true;
     const result = await runner.run({
       system: options.remediate ? systemPromptRepositoryRepair() : systemPromptRepositoryReview(),
-      prompt: prompt + handoff,
+      prompt: prompt + repairContext + handoff,
       tools: toolset.tools, budgets: options.budgets, budget, model: options.model.model, seed: options.seed, role: "blue", stage, requestPolicy: REQUEST_POLICY,
       onEvent: emitAgentEvent,
     });
@@ -212,7 +221,7 @@ export async function executeRepositoryReview(input: ExecuteRepositoryReviewOpti
   const record = {
     schemaVersion: 4, kind: "local_repository" as const, workflow, runId, mode: "live" as const, configHash, status, reason, summary, assessmentPolicy: ASSESSMENT_POLICY,
     startedAt, endedAt, elapsedMs: endedAt - startedAt, costUsd: invoked ? null : 0,
-    seed: options.seed, budgets: options.budgets, requestPolicy: REQUEST_POLICY, usage: budget?.usage ?? { inputTokens: 0, outputTokens: 0, steps: 0 }, usageKnown: budget?.usageKnown ?? true,
+    seed: options.seed, budgets: options.budgets, requestPolicy: REQUEST_POLICY, sourceContextPolicy: SOURCE_CONTEXT_POLICY, usage: budget?.usage ?? { inputTokens: 0, outputTokens: 0, steps: 0 }, usageKnown: budget?.usageKnown ?? true,
     repository: { name: source?.name ?? basename(options.repoPath), url: source?.url, requestedRef: options.ref ?? "HEAD", commit: workspace?.commit ?? null, files: workspace?.files.length ?? 0 },
     model: options.model, ...(options.reviewModel ? { reviewModel: options.reviewModel, reviewSummary, ...(reviewStatus ? { reviewStatus } : {}), ...(reviewFailure ? { reviewFailure } : {}) } : {}), verification: { scope: options.remediate ? "source_patch" : "source_review", independentGrader: false, testsRun: false, protectedFilesUnchanged },
     findings: [...recordedFindings.values()], assessments: toolset?.assessments() ?? [], unassessedFindingIds: toolset?.unassessedFindingIds() ?? reviewToolset?.findings().map(finding => finding.findingId) ?? [], changes: { files, findingIdsByFile: toolset?.changeFindings() ?? {}, lineCount: patch.split("\n").filter(line => /^[+-](?![+-])/.test(line)).length },

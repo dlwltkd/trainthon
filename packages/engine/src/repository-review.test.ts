@@ -82,6 +82,37 @@ function assertFinal(record: Awaited<ReturnType<typeof executeRepositoryReview>>
 describe("prompt-driven source review", () => {
   const reviewModel = { provider: "compatible" as const, model: "review-test", baseURL: "https://api.routeway.ai/v1" };
 
+  it("supplies the same pinned source independently to both roles without requiring duplicate file calls", async () => {
+    const f = fixture();
+    const runner = (role: "red" | "blue") => ({ run: async (input: Parameters<ScriptedRunner["run"]>[0]) => {
+      expect(input.prompt).toContain(JSON.stringify(original));
+      expect(input.prompt).not.toContain("TEST_PLACEHOLDER");
+      return new ScriptedRunner(async tools => {
+        await tools.use_skill!({ skillId: "source-security-review", reason: "Inspect the source supplied in context." });
+        await tools.report_progress!(progress(["src/add.ts"]));
+        await expect(tools.report_progress!(progress(["settings.config.ts"]))).rejects.toThrow("observed repository file");
+        await tools.report_finding!({ ...finding, id: role === "red" ? "addition" : "blue-addition" });
+        if (role === "blue") {
+          await tools.assess_finding!({ findingId: "addition", verdict: "confirmed", blueFindingId: "blue-addition", evidence: ["src/add.ts"], summary: "Independently checked the complete source supplied in Blue's own context." });
+          await tools.use_skill!({ skillId: "source-remediation", reason: "Correct the independently observed arithmetic." });
+          await tools.write_file!({ path: "src/add.ts", content: corrected });
+          await inspect(tools);
+        }
+        await tools.report_progress!(progress(["src/add.ts"], true));
+        return "The source observation was recorded; runtime tests were not performed.";
+      }).run(input);
+    } });
+    const record = await executeRepositoryReview({ ...f.options, prompt: "Review src/add.ts and correct the arithmetic if needed.", remediate: true, reviewModel,
+      reviewRunner: runner("red"), runner: runner("blue") });
+    expect(record.status).toBe("PATCH_PROPOSED");
+    expect(f.events.filter(event => event.type === "tool_call" && ["read_file", "grep"].includes(event.name))).toEqual([]);
+    for (const role of ["red", "blue"]) expect(JSON.parse(readFileSync(join(record.artifacts.dir, `source-context-${role}.json`), "utf8")).files).toEqual([
+      { path: "src/add.ts", bytes: Buffer.byteLength(original), sha256: sha256(original) },
+    ]);
+    expect(record.requestPolicy).not.toHaveProperty("progressEverySteps");
+    assertFinal(record, f);
+  });
+
   it.each(["provider", "cancel"])("preserves candidate edits when %s interruption precedes final validation", async interruption => {
     const f = fixture();
     const controller = new AbortController();
@@ -166,7 +197,7 @@ describe("prompt-driven source review", () => {
         expect(input.system).toContain("You are Red");
         expect(input.handoffAfter).toBeUndefined();
         expect(input.maxOutputTokens).toBeUndefined();
-        expect(input.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream", progressEverySteps: 6, contextCheckpointBytes: 64_000 });
+        expect(input.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream", contextCheckpointBytes: 64_000 });
         return new ScriptedRunner(async tools => {
           for (const name of ["write_file", "edit_file", "inspect_diff", "run_regression", "shell", "fetch"]) expect(tools[name]).toBeUndefined();
           await startReview(tools);
@@ -179,7 +210,7 @@ describe("prompt-driven source review", () => {
       runner: { run: async input => {
         phases.push(input.role!);
         expect(input.budget).toBe(sharedBudget);
-        expect(input.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream", progressEverySteps: 6, contextCheckpointBytes: 64_000 });
+        expect(input.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream", contextCheckpointBytes: 64_000 });
         expect(input.prompt).toContain("Red source-review handoff");
         expect(input.prompt).toContain('"findingId": "addition"');
         expect(input.system).toContain("Independently validate every Red finding");
@@ -204,7 +235,7 @@ describe("prompt-driven source review", () => {
     expect(record.reviewSummary).toContain("Red observed subtraction");
     expect(record.reviewStatus).toBe("complete");
     expect(record).not.toHaveProperty("reviewHandoffAfter");
-    expect(record.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream", progressEverySteps: 6, contextCheckpointBytes: 64_000 });
+    expect(record.requestPolicy).toEqual({ maxRetries: 2, timeoutMs: 90_000, transport: "stream", contextCheckpointBytes: 64_000 });
     expect(record.usage.steps).toBe(2);
     expect(record.findings.map(finding => [finding.agentRole, finding.findingId])).toEqual([["red", "addition"], ["blue", "addition"]]);
     expect(record.changes.findingIdsByFile).toEqual({ "src/add.ts": ["addition"] });

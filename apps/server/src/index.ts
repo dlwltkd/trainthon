@@ -277,7 +277,7 @@ export function createApp(options: AppOptions = {}) {
     if (!RUN_ID_PATTERN.test(id) || !name) return c.json({ error: "bad request" }, 400);
     const dir = registry.runDir(id);
     if (!dir) return c.json({ error: "no artifact directory for this run" }, 404);
-    if (!/^(?:record\.json|events\.jsonl|patch\.diff|input-patch\.diff|prompt\.txt|report\.txt|repository\.json|red-review-handoff\.json|red-review-summary\.txt|regression\.[a-z0-9]+|(?:repair|review)-summary\.txt|tests\/[a-z0-9._-]+\.(?:json|txt))$/i.test(name)) {
+    if (!/^(?:record\.json|events\.jsonl|patch\.diff|input-patch\.diff|prompt\.txt|report\.txt|repository\.json|source-context-(?:red|blue)\.json|red-review-handoff\.json|red-review-summary\.txt|regression\.[a-z0-9]+|(?:repair|review)-summary\.txt|tests\/[a-z0-9._-]+\.(?:json|txt))$/i.test(name)) {
       return c.json({ error: "artifact not available" }, 404);
     }
     const text = readBoundedText(dir, name, MAX_FILE_BYTES);

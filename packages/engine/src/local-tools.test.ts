@@ -34,6 +34,29 @@ function caller(tools: AgentTool[]) {
   };
 }
 
+test("initial source context includes only complete bounded files and makes only those paths available as evidence", async () => {
+  const f = await fixture({ "app.py": "answer = 42\n", "other.py": "unread = True\n", "large.py": "x".repeat(200_000), ".env": "PRIVATE_PLACEHOLDER=value" });
+  symlinkSync(join(f.dir, ".env"), join(f.dir, "link.py")); f.workspace.files.push("link.py");
+  const context = f.toolset.sourceContext("Review app.py, large.py, .env and link.py", 192_000, 8);
+  expect(context.files.map(file => file.path)).toEqual(["app.py"]);
+  expect(context.text).toContain(JSON.stringify("answer = 42\n"));
+  expect(context.text).not.toContain("PRIVATE_PLACEHOLDER");
+  expect(context.files[0]!.sha256).toMatch(/^[a-f0-9]{64}$/);
+  await f.call("report_progress", { ...plan, evidence: ["app.py"] });
+  await expect(f.call("report_progress", { ...plan, evidence: ["other.py"] })).rejects.toThrow("observed repository file");
+  await expect(f.call("report_progress", { ...plan, evidence: ["large.py"] })).rejects.toThrow("observed repository file");
+});
+
+test("initial context bounds serialized Unicode bytes and supports a single-file repository", async () => {
+  const content = "가😀\"\\".repeat(100);
+  const f = await fixture({ "app.py": content });
+  expect(f.toolset.sourceContext("Review the repository", 500, 8).files).toEqual([]);
+  expect(f.toolset.observedFiles()).not.toContain("app.py");
+  expect(f.toolset.sourceContext("Review the repository", 10_000, 8).files.map(file => file.path)).toEqual(["app.py"]);
+  f.controller.abort();
+  expect(() => f.toolset.sourceContext("Review", 10_000, 8)).toThrow();
+});
+
 test("read_file bounds serialized bytes and resumes every character of large Unicode and minified lines", async () => {
   const source = "header\n" + "가😀\"\\\t".repeat(14_000) + "TAIL_AFTER_100K\nlast line\n";
   const f = await fixture({ "app.py": source });

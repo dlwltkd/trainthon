@@ -208,9 +208,15 @@ twice per request. Responses are streamed, with a 90-second inactivity deadline.
 Active streams can continue within the shared run deadline. The timeline shows
 waiting, receiving, tool preparation, first-response latency, and retry countdowns.
 Only execution metadata and public decision summaries are displayed.
-After six model steps without a successful progress update, the harness requests
-an updated public summary and evidence through `report_progress`, then restores
-the investigation tools. This checkpoint does not end Red's investigation.
+For a single-file snapshot, or exact repository paths named in the user prompt,
+the harness supplies complete source files directly in each role's initial
+context, up to eight files and 192 KB. This avoids repeated discovery calls while
+keeping Red's baseline and Blue's candidate separate. Omitted or changed source
+is still available through bounded file tools. The provided paths and content
+hashes are recorded in `source-context-red.json` and `source-context-blue.json`.
+
+Agents report meaningful decisions, changes, and completion through
+`report_progress`; the harness does not add model requests on a fixed step cadence.
 After 64 KB of new conversation history, prompt reviews request a fresh public
 progress update and compact older messages into a checkpoint. The original task,
 active skill, observed file paths, findings, Blue assessments, edit records, and

@@ -37,18 +37,18 @@ export async function runSourceEvaluation(flags: Record<string, string | boolean
     const dir = join(runsDir, "evaluations", id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const manifest: SourceEvaluation["manifest"] = {
-      suite: "cvefixes-source-pilot-v2", datasetUrl: "https://github.com/secureIT-project/CVEfixes", cohortUrl: COHORT_URL,
+      suite: "cvefixes-source-pilot-v3", datasetUrl: "https://github.com/secureIT-project/CVEfixes", cohortUrl: COHORT_URL,
       selection: "Two Python source-fix cases from the official example cohort, selected before any evaluation: CWE-93 and CWE-755. Each fixing commit and its first parent provide a paired before/fixed control. This is a convenience sample from one project, not the full CVEfixes release.",
       model: "gpt-5.6-sol", codeCommit, codexVersion, maxWallMs: 8 * 60_000, cumulativeTokenLimit: null, vouchMaxSteps: null, seed: 1,
       grader: "python-ast-reference-v1", runtimeTests: false,
       conditions: {
         codex: "Native Codex CLI, source-only configuration: full file in the prompt, JSON replacements, tools/web/host skills disabled, read-only process workspace, provider defaults for reasoning. This is not unrestricted default Codex.",
-        vouch: "Production Red review then Blue validation/repair, separate source workspaces, bounded file tools and skills, same model for both roles, provider defaults for reasoning. No source execution or tool network access.",
+        vouch: "Production Red review then Blue validation/repair, separate source workspaces, bounded file tools and skills, same model for both roles. Each role receives complete named files up to 192 KB in its initial context. Progress is reported at decisions and context compaction, without a fixed six-step cadence. Provider defaults for reasoning. No source execution or tool network access.",
       },
       limitations: [
-        "Development pilot v2: the 40-step Vouch cutoff was removed after inspecting v1's incomplete repair. The cohort, prompts, grader, model, and wall-time allowance are unchanged. This is a development-set re-evaluation, not a held-out performance result. Earlier experiments remain available.",
+        "Development pilot v3: v2 removed the 40-step cutoff; v3 supplies complete named files in the initial context and removes periodic progress-only requests after profiling v1/v2. The cohort, task prompts, grader, model, and wall-time allowance are unchanged. This is development-set re-evaluation, not a held-out result. All earlier experiments remain available.",
         "Four snapshots from two CVEs in one project; correlated samples and possible model training contamination. No general security-performance claim or statistical significance is established.",
-        "The task names the CWE and relevant functions. Baseline receives the whole file inline; Vouch reads it through tools. Model-call counts and reasoning defaults differ. Equal model and wall-time allowance do not mean equal compute.",
+        "The task names the CWE and relevant functions. Both conditions receive the complete file inline; Vouch also has bounded source tools and separate model roles. Model-call counts and reasoning defaults differ. Equal model and wall-time allowance do not mean equal compute.",
         "Label agreement requires a verbatim source citation; the explanation still needs human review. Fixed controls are fixed only for the scoped concern, not certified free of all vulnerabilities.",
         "AST equality is a conservative comparison with the published correction. It can reject valid alternative fixes and is not a semantic or runtime regression test. Neither candidate nor reference code is executed.",
         "All planned trials remain in the denominator. Errors and uncertain answers earn no credit. No target uplift, best-of selection, or removal of unsuccessful trials.",

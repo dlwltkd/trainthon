@@ -120,8 +120,8 @@ describe("source review and remediation skills", () => {
     expect(validation).toContain("do not edit files");
     expect(systemPromptRepositoryReview()).toContain("result scope is source_review");
     expect(systemPromptRepositoryReview()).not.toContain("source-remediation");
-    expect(REPOSITORY_REVIEW_GUIDANCE.version).toBe("1.2.0");
-    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.1.0");
+    expect(REPOSITORY_REVIEW_GUIDANCE.version).toBe("1.3.0");
+    expect(SOURCE_REPAIR_GUIDANCE.version).toBe("1.2.0");
   });
 
   test("separates Red's read-only discovery from Blue's independent source validation", () => {

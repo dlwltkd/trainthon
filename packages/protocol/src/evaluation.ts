@@ -41,7 +41,7 @@ export interface SourceEvaluation {
   endedAt?: number;
   manifestHash: string;
   manifest: {
-    suite: "cvefixes-source-pilot-v1" | "cvefixes-source-pilot-v2";
+    suite: "cvefixes-source-pilot-v1" | "cvefixes-source-pilot-v2" | "cvefixes-source-pilot-v3";
     datasetUrl: string;
     cohortUrl: string;
     selection: string;

@@ -64,7 +64,7 @@ export function createAgentTrace(options: TraceOptions) {
     },
     {
       name: "report_progress",
-      description: "Publish a short public decision summary, next action, observed repository evidence paths and up to six plan steps. Start with evidence: [] before reading files; files you intend to read belong in nextAction or plan, not evidence. After successful reads, searches or edits, those paths may be cited. Use at meaningful decisions, before edits, and before finishing. At most one step may be in_progress. This is a user-facing summary, not private internal reasoning.",
+      description: "Publish a short public decision summary, next action, observed repository evidence paths and up to six plan steps. Complete files explicitly supplied by the harness in your initial context may be cited; otherwise start with evidence: [] before reading files. Intended reads belong in nextAction or plan. After successful reads, searches or edits, those paths may also be cited. Use at meaningful decisions, before edits, and before finishing. At most one step may be in_progress. This is a user-facing summary, not private internal reasoning.",
       schema: updateSchema,
       execute: (args, call) => options.enqueue(() => {
         options.signal.throwIfAborted();
