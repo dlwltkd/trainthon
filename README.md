@@ -31,24 +31,34 @@ Three layers, three packages, so the benchmark can toggle them cleanly:
 
 The same execution engine powers both the product (Studio) and the benchmark (Bench).
 
-See [`HARNESS_PLAN.md`](./HARNESS_PLAN.md) for the full build spec, benchmark protocol, and milestones.
+**Local handoff, current milestone, env vars, and what to run on a desktop:** see
+[`HARNESS_PLAN.md`](./HARNESS_PLAN.md) §0. Spec, benchmark protocol, and remaining M5/M6
+work live in the rest of that file.
 
 ## Dev
 
-```bash
-pnpm install
-pnpm typecheck
-pnpm cli run --task hello --condition B   # writes runs/<runId>.jsonl
-```
-
-Requires Node 22+ and pnpm.
+Requires Node 22+ and pnpm 10.33.3. Branch: `cursor/harness-scaffold-39df`.
 
 ```bash
 pnpm install
 pnpm typecheck
 pnpm test
+
+# no API key → scripted wiring smoke (not a model score)
 pnpm cli run --task proto-pollution --condition C
-pnpm cli replay --run <runId>
+pnpm cli run --task proto-pollution-fixed --condition C
 pnpm cli bench --set dev
-pnpm dev   # dashboard :5173  +  server :8787
+pnpm cli replay --run <runId>
+
+# live Studio (Vite :5173) + API (:8787)
+pnpm dev
 ```
+
+Keys are **not** loaded from `.env` automatically. Copy `.env.example`, fill it, then
+`set -a && source .env && set +a` (or export in the shell) before `cli` / `dev`.
+
+With `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` the same commands use a real model. Optional
+Red-only gateway: `VOUCH_RED_MODEL` + `ROUTEWAY_API_KEY` — see the plan §0.3.
+
+Dev tasks: `proto-pollution`, `path-traversal` (vuln); `proto-pollution-fixed`,
+`path-join-na` (controls; correct outcome is zero-line `NOT_REPRODUCIBLE`).
