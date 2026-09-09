@@ -61,8 +61,9 @@ model, and add the provider keys locally:
 
 ```bash
 cp .env.example .env
-# Edit .env, then validate both provider connections.
+# Edit .env, validate configuration, then make one tool-call probe per role.
 pnpm cli doctor
+pnpm cli doctor --live
 ```
 
 `.env` is ignored by Git. Vouch accepts key-environment names rather than raw
@@ -72,7 +73,8 @@ the code. Its adapter sends `max_completion_tokens` and omits `seed`, which this
 exact GLM model does not advertise as supported. The adapter and connection
 check are implemented; a real provider smoke needs valid credentials.
 
-Run the repair with the provider configuration loaded from `.env`:
+The CLI loads the root `.env` without overriding exported variables. Run the
+repair with that provider configuration:
 
 ```bash
 pnpm cli run \
