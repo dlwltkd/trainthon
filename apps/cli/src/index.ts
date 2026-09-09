@@ -147,7 +147,7 @@ async function main(): Promise<void> {
   }
   process.stderr.write(
     "usage:\n" +
-    "  vouch eval --suite cvefixes [--prepare]\n" +
+    "  vouch eval --suite <cvefixes|development20> [--prepare]\n" +
     "  vouch doctor [--live] [--model <id>] [--provider anthropic|openai|compatible] [--base-url <url>] [--api-key-env <name>]\n" +
     "    [--red-model <id>] [--red-provider anthropic|openai|compatible] [--red-base-url <url>] [--red-api-key-env <name>]\n" +
     "  vouch run --repo <local path|https://github.com/owner/repo> --prompt <instructions> [--fix] [--report <file>] [--ref HEAD]\n" +

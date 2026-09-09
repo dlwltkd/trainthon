@@ -13,6 +13,17 @@ function fixture(): SourceEvaluation {
 }
 
 describe("measured source evaluation display", () => {
+  it("labels development tuning separately from the external CVEfixes pilot", () => {
+    const run = fixture(); run.manifest.suite = "defensive-development20-v1";
+    run.manifest.cases[0]!.title = "Tenant boundary";
+    const html = renderToStaticMarkup(<SourceEvaluationCard evaluation={run} />);
+    expect(html).toContain("Development 20 · fixed tuning set");
+    expect(html).toContain("This is not held-out performance");
+    expect(html).toContain("Tenant boundary");
+    expect(html).not.toContain("CVEfixes dataset and publication");
+    expect(html).not.toContain("https://example.com/source");
+  });
+
   it("shows a computed paired result with sample size and verification scope", () => {
     const run = fixture(); run.trials[0]!.verdict = "uncertain";
     const html = renderToStaticMarkup(<SourceEvaluationCard evaluation={run} />);

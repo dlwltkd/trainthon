@@ -7,20 +7,21 @@ export const CODEX_DISABLED_FEATURES = [
   "computer_use", "image_generation", "view_image", "multi_agent", "skill_search", "in_app_browser",
 ];
 
-const answerSchema = {
+const answerSchema = (sourcePath: string) => ({
   type: "object", additionalProperties: false, required: ["verdict", "summary", "evidence", "edits"],
   properties: {
     verdict: { type: "string", enum: ["issue_present", "issue_absent", "uncertain"] },
     summary: { type: "string" },
-    evidence: { type: "array", items: { type: "object", additionalProperties: false, required: ["path", "quote"], properties: { path: { type: "string", enum: ["bottle.py"] }, quote: { type: "string" } } } },
+    evidence: { type: "array", items: { type: "object", additionalProperties: false, required: ["path", "quote"], properties: { path: { type: "string", enum: [sourcePath] }, quote: { type: "string" } } } },
     edits: { type: "array", items: { type: "object", additionalProperties: false, required: ["oldText", "newText"], properties: { oldText: { type: "string" }, newText: { type: "string" } } } },
   },
-};
+});
 
-export async function runCodexSource(options: { dir: string; prompt: string; source: string; model: string; maxWallMs: number; signal: AbortSignal }) {
+export async function runCodexSource(options: { dir: string; prompt: string; source: string; sourcePath?: string; model: string; maxWallMs: number; signal: AbortSignal }) {
+  const sourcePath = options.sourcePath ?? "bottle.py";
   const schemaPath = join(options.dir, "answer-schema.json"), outputPath = join(options.dir, "answer.json");
-  writeFileSync(schemaPath, JSON.stringify(answerSchema), { mode: 0o600 });
-  const prompt = `${options.prompt}\nFor this source-only Codex condition, the entire original bottle.py is provided below. Return source replacements in an additional edits array: [{"oldText":"exact unique existing text","newText":"replacement"}]. Use [] if no correction is needed. Do not call tools. The harness applies the replacements to a private candidate after your answer.\n<source path="bottle.py">\n${options.source}\n</source>`;
+  writeFileSync(schemaPath, JSON.stringify(answerSchema(sourcePath)), { mode: 0o600 });
+  const prompt = `${options.prompt}\nFor this source-only Codex condition, the entire original ${sourcePath} is provided below. Return source replacements in an additional edits array: [{"oldText":"exact unique existing text","newText":"replacement"}]. Use [] if no correction is needed. Do not call tools. The harness applies the replacements to a private candidate after your answer.\n<source path="${sourcePath}">\n${options.source}\n</source>`;
   writeFileSync(join(options.dir, "prompt.txt"), prompt, { mode: 0o600 });
   const args = ["exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "-m", options.model,
     "-c", 'web_search="disabled"', "--enable", "skip_host_skill_discovery", "--json", "--output-schema", schemaPath, "-o", outputPath];

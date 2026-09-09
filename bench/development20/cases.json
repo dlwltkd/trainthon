@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "suite": "defensive-development20-v1",
+  "purpose": "Fixed synthetic source development set. Repeated tuning results are not held-out benchmark performance.",
+  "cases": [
+    {
+      "id": "case-01",
+      "title": "Tenant-scoped document access",
+      "cwe": "CWE-863",
+      "variant": "before",
+      "contract": "An active tenant member may read a document only when its tenant equals the principal's tenant. A global administrator may read across tenants. Missing principals must be denied. Preserve the function's boolean interface.",
+      "source": "def can_read(principal, document):\n    if principal is None:\n        return False\n    if principal.get(\"global_admin\", False):\n        return True\n    same_tenant = principal[\"tenant_id\"] == document[\"tenant_id\"]\n    active_member = principal.get(\"membership\") == \"active\"\n    return same_tenant or active_member\n",
+      "reference": "def can_read(principal, document):\n    if principal is None:\n        return False\n    if principal.get(\"global_admin\", False):\n        return True\n    same_tenant = principal[\"tenant_id\"] == document[\"tenant_id\"]\n    active_member = principal.get(\"membership\") == \"active\"\n    return same_tenant and active_member\n"
+    },
+    {
+      "id": "case-02",
+      "title": "Role guard with an explicit administrator branch",
+      "cwe": "CWE-862",
+      "variant": "fixed",
+      "contract": "Deletion is permitted only for an administrator or the resource owner with the editor role. Missing identity is denied. The caller performs the actual deletion only on a True return.",
+      "source": "def can_delete(principal, resource):\n    if principal is None:\n        return False\n    roles = set(principal.get(\"roles\", ()))\n    if \"administrator\" in roles:\n        return True\n    return resource[\"owner_id\"] == principal[\"id\"] and \"editor\" in roles\n",
+      "reference": "def can_delete(principal, resource):\n    if principal is None:\n        return False\n    roles = set(principal.get(\"roles\", ()))\n    if \"administrator\" in roles:\n        return True\n    return resource[\"owner_id\"] == principal[\"id\"] and \"editor\" in roles\n"
+    },
+    {
+      "id": "case-03",
+      "title": "Session expiration boundary",
+      "cwe": "CWE-613",
+      "variant": "before",
+      "contract": "Session expiration and now are integer UTC seconds. A session is valid strictly before expires_at, including rejection at the expiration instant. Revoked sessions are also rejected.",
+      "source": "def session_active(session, now):\n    if session.get(\"revoked\", False):\n        return False\n    if now > session[\"expires_at\"]:\n        return False\n    return True\n",
+      "reference": "def session_active(session, now):\n    if session.get(\"revoked\", False):\n        return False\n    if now >= session[\"expires_at\"]:\n        return False\n    return True\n"
+    },
+    {
+      "id": "case-04",
+      "title": "Revocation inherited through a helper",
+      "cwe": "CWE-613",
+      "variant": "fixed",
+      "contract": "Every session returned to the caller must be unrevoked and unexpired. Unknown session IDs produce None. Time values use the same unit.",
+      "source": "def _usable(session, now):\n    return not session[\"revoked\"] and now < session[\"expires_at\"]\n\ndef resolve_session(sessions, session_id, now):\n    session = sessions.get(session_id)\n    if session is None:\n        return None\n    return session if _usable(session, now) else None\n",
+      "reference": "def _usable(session, now):\n    return not session[\"revoked\"] and now < session[\"expires_at\"]\n\ndef resolve_session(sessions, session_id, now):\n    session = sessions.get(session_id)\n    if session is None:\n        return None\n    return session if _usable(session, now) else None\n"
+    },
+    {
+      "id": "case-05",
+      "title": "One-time recovery approval",
+      "cwe": "CWE-841",
+      "variant": "before",
+      "contract": "The caller already authenticated the recovery request and serializes access to this in-memory record. Approval must reject expired or previously used records. A successful approval must consume the record before returning its account ID. Preserve rejection behavior.",
+      "source": "def approve_recovery(record, now):\n    if record[\"used\"] or now >= record[\"expires_at\"]:\n        return None\n    account_id = record[\"account_id\"]\n    return account_id\n",
+      "reference": "def approve_recovery(record, now):\n    if record[\"used\"] or now >= record[\"expires_at\"]:\n        return None\n    account_id = record[\"account_id\"]\n    record[\"used\"] = True\n    return account_id\n"
+    },
+    {
+      "id": "case-06",
+      "title": "Permission lookup error handling",
+      "cwe": "CWE-636",
+      "variant": "before",
+      "contract": "The supplied lookup callable returns a boolean permission decision or raises LookupError when the policy is unavailable. Unavailable policy must deny access. Preserve successful decisions and let unrelated programming errors propagate.",
+      "source": "def permitted(lookup, principal_id, action):\n    try:\n        return lookup(principal_id, action)\n    except LookupError:\n        return True\n",
+      "reference": "def permitted(lookup, principal_id, action):\n    try:\n        return lookup(principal_id, action)\n    except LookupError:\n        return False\n"
+    },
+    {
+      "id": "case-07",
+      "title": "Profile field allowlist",
+      "cwe": "CWE-915",
+      "variant": "fixed",
+      "contract": "Only display_name and timezone may be changed from user-submitted profile fields. Existing role and account identifiers must remain intact. The function must return a new mapping without changing the supplied stored mapping.",
+      "source": "EDITABLE_FIELDS = frozenset({\"display_name\", \"timezone\"})\n\ndef update_profile(stored, submitted):\n    result = dict(stored)\n    result.update({key: value for key, value in submitted.items() if key in EDITABLE_FIELDS})\n    return result\n",
+      "reference": "EDITABLE_FIELDS = frozenset({\"display_name\", \"timezone\"})\n\ndef update_profile(stored, submitted):\n    result = dict(stored)\n    result.update({key: value for key, value in submitted.items() if key in EDITABLE_FIELDS})\n    return result\n"
+    },
+    {
+      "id": "case-08",
+      "title": "Audit event field selection",
+      "cwe": "CWE-532",
+      "variant": "fixed",
+      "contract": "An audit event may include only actor_id, action, and resource_id from its input. Extra attributes may contain credentials and must be excluded. Missing public fields may be omitted; do not modify the input.",
+      "source": "PUBLIC_AUDIT_FIELDS = (\"actor_id\", \"action\", \"resource_id\")\n\ndef audit_event(attributes):\n    return {key: attributes[key] for key in PUBLIC_AUDIT_FIELDS if key in attributes}\n",
+      "reference": "PUBLIC_AUDIT_FIELDS = (\"actor_id\", \"action\", \"resource_id\")\n\ndef audit_event(attributes):\n    return {key: attributes[key] for key in PUBLIC_AUDIT_FIELDS if key in attributes}\n"
+    },
+    {
+      "id": "case-09",
+      "title": "Public error response boundary",
+      "cwe": "CWE-209",
+      "variant": "before",
+      "contract": "Unexpected service exceptions must return status 500 and the public message 'Service unavailable'. The request_id is an already sanitized correlation ID. Exception text may contain internal details and must not enter the returned payload. Keep successful response behavior unchanged.",
+      "source": "def service_response(operation, request_id):\n    try:\n        result = operation()\n    except Exception as error:\n        return 500, {\"error\": str(error), \"request_id\": request_id}\n    return 200, {\"result\": result, \"request_id\": request_id}\n",
+      "reference": "def service_response(operation, request_id):\n    try:\n        result = operation()\n    except Exception as error:\n        return 500, {\"error\": \"Service unavailable\", \"request_id\": request_id}\n    return 200, {\"result\": result, \"request_id\": request_id}\n"
+    },
+    {
+      "id": "case-10",
+      "title": "Production session cookie attributes",
+      "cwe": "CWE-614",
+      "variant": "before",
+      "contract": "The consumer uses these attributes for a production HTTPS-only session cookie. The cookie must be Secure and HttpOnly, retain SameSite=Lax, and expire after the supplied positive max_age seconds. The function only builds attributes; it does not send a response.",
+      "source": "def session_cookie(max_age):\n    return {\n        \"secure\": False,\n        \"httponly\": True,\n        \"samesite\": \"Lax\",\n        \"max_age\": max_age,\n    }\n",
+      "reference": "def session_cookie(max_age):\n    return {\n        \"secure\": True,\n        \"httponly\": True,\n        \"samesite\": \"Lax\",\n        \"max_age\": max_age,\n    }\n"
+    },
+    {
+      "id": "case-11",
+      "title": "State-changing method policy",
+      "cwe": "CWE-352",
+      "variant": "fixed",
+      "contract": "Only GET, HEAD, and OPTIONS are exempt from the application's additional request-integrity check. All other methods require it, irrespective of casing. The surrounding caller enforces authentication separately.",
+      "source": "SAFE_METHODS = frozenset({\"GET\", \"HEAD\", \"OPTIONS\"})\n\ndef requires_integrity_check(method):\n    return method.upper() not in SAFE_METHODS\n",
+      "reference": "SAFE_METHODS = frozenset({\"GET\", \"HEAD\", \"OPTIONS\"})\n\ndef requires_integrity_check(method):\n    return method.upper() not in SAFE_METHODS\n"
+    },
+    {
+      "id": "case-12",
+      "title": "Exact trusted-origin policy",
+      "cwe": "CWE-346",
+      "variant": "before",
+      "contract": "The caller supplies normalized origins and a tuple of explicitly trusted complete origins. Only exact entries in that tuple may be accepted; this function must not expand trust to other origins. Preserve the boolean return type.",
+      "source": "def trusted_origin(origin, configured_origins):\n    return any(origin.startswith(configured) for configured in configured_origins)\n",
+      "reference": "def trusted_origin(origin, configured_origins):\n    return origin in configured_origins\n"
+    },
+    {
+      "id": "case-13",
+      "title": "Outbound certificate verification defaults",
+      "cwe": "CWE-295",
+      "variant": "fixed",
+      "contract": "The function builds transport options for ordinary outbound HTTPS requests. Certificate verification must remain enabled, including when no CA bundle is explicitly selected. A supplied CA bundle must be preserved as the verifier setting.",
+      "source": "def transport_options(ca_bundle=None):\n    return {\n        \"verify\": True if ca_bundle is None else ca_bundle,\n        \"timeout\": 10,\n    }\n",
+      "reference": "def transport_options(ca_bundle=None):\n    return {\n        \"verify\": True if ca_bundle is None else ca_bundle,\n        \"timeout\": 10,\n    }\n"
+    },
+    {
+      "id": "case-14",
+      "title": "Declared body size checked before allocation",
+      "cwe": "CWE-770",
+      "variant": "before",
+      "contract": "The caller has already validated declared_size as the exact nonnegative body length. read_body allocates and reads that many bytes. Requests above max_bytes must be rejected before invoking read_body. Requests at or below the limit must return the reader's bytes unchanged.",
+      "source": "def read_bounded_body(read_body, declared_size, max_bytes):\n    body = read_body(declared_size)\n    if declared_size > max_bytes:\n        raise ValueError(\"body too large\")\n    return body\n",
+      "reference": "def read_bounded_body(read_body, declared_size, max_bytes):\n    if declared_size > max_bytes:\n        raise ValueError(\"body too large\")\n    body = read_body(declared_size)\n    return body\n"
+    },
+    {
+      "id": "case-15",
+      "title": "Whole-cost quota reservation",
+      "cwe": "CWE-770",
+      "variant": "before",
+      "contract": "The caller serializes access to account and supplies nonnegative integer cost and remaining values. Reserve the entire cost only if it fits the remaining quota. Denial must leave the mapping unchanged; a zero-cost reservation is allowed.",
+      "source": "def reserve_quota(account, cost):\n    remaining = account[\"remaining\"]\n    if remaining <= 0:\n        return False\n    account[\"remaining\"] = remaining - cost\n    return True\n",
+      "reference": "def reserve_quota(account, cost):\n    remaining = account[\"remaining\"]\n    if remaining < cost:\n        return False\n    account[\"remaining\"] = remaining - cost\n    return True\n"
+    },
+    {
+      "id": "case-16",
+      "title": "Authorization before externally visible change",
+      "cwe": "CWE-862",
+      "variant": "before",
+      "contract": "allowed is the caller's authoritative permission decision. On denial, reject before invoking persist, which performs a visible write. On permission, call persist exactly once and return its result unchanged.",
+      "source": "def save_authorized(allowed, persist, value):\n    result = persist(value)\n    if not allowed:\n        raise PermissionError(\"not permitted\")\n    return result\n",
+      "reference": "def save_authorized(allowed, persist, value):\n    if not allowed:\n        raise PermissionError(\"not permitted\")\n    result = persist(value)\n    return result\n"
+    },
+    {
+      "id": "case-17",
+      "title": "Access-grant lifetime units",
+      "cwe": "CWE-613",
+      "variant": "before",
+      "contract": "now_seconds and lifetime_seconds are integer seconds. The stored expires_at_seconds must be now_seconds plus the requested positive lifetime, without changing units. Preserve the requested subject_id.",
+      "source": "def access_grant(subject_id, now_seconds, lifetime_seconds):\n    return {\n        \"subject_id\": subject_id,\n        \"expires_at_seconds\": now_seconds + lifetime_seconds * 1000,\n    }\n",
+      "reference": "def access_grant(subject_id, now_seconds, lifetime_seconds):\n    return {\n        \"subject_id\": subject_id,\n        \"expires_at_seconds\": now_seconds + lifetime_seconds,\n    }\n"
+    },
+    {
+      "id": "case-18",
+      "title": "Upload category allowlist",
+      "cwe": "CWE-434",
+      "variant": "fixed",
+      "contract": "This function only chooses whether a declared upload category is supported. Categories are case-insensitive, but only image and document may be accepted. Other checks are outside this function's scope. Input is already a string.",
+      "source": "ALLOWED_CATEGORIES = frozenset({\"image\", \"document\"})\n\ndef category_allowed(category):\n    return category.lower() in ALLOWED_CATEGORIES\n",
+      "reference": "ALLOWED_CATEGORIES = frozenset({\"image\", \"document\"})\n\ndef category_allowed(category):\n    return category.lower() in ALLOWED_CATEGORIES\n"
+    },
+    {
+      "id": "case-19",
+      "title": "Request capacity released on every exit",
+      "cwe": "CWE-772",
+      "variant": "fixed",
+      "contract": "After a successful acquire, release must be called exactly once whether operation returns or raises. If acquire itself raises, release must not be called. Preserve the operation's result or original exception.",
+      "source": "def with_capacity(acquire, release, operation):\n    acquire()\n    try:\n        return operation()\n    finally:\n        release()\n",
+      "reference": "def with_capacity(acquire, release, operation):\n    acquire()\n    try:\n        return operation()\n    finally:\n        release()\n"
+    },
+    {
+      "id": "case-20",
+      "title": "Debug response default",
+      "cwe": "CWE-489",
+      "variant": "before",
+      "contract": "The application supplies a validated mapping whose optional debug key is boolean. Omitted debug must disable detailed error responses. Explicit True and False values must be respected. Return only a boolean.",
+      "source": "def include_error_details(options):\n    return options.get(\"debug\", True)\n",
+      "reference": "def include_error_details(options):\n    return options.get(\"debug\", False)\n"
+    }
+  ]
+}

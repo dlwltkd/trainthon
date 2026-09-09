@@ -90,18 +90,25 @@ Open [http://127.0.0.1:8787](http://127.0.0.1:8787). Provider keys are loaded by
 server from the root `.env`; the browser receives configuration and key-presence
 status, never the keys. `pnpm typecheck` checks both the harness and dashboard.
 
-Run the paired source pilot with the native Codex CLI and Python 3 installed:
+Run a paired source evaluation with the native Codex CLI and Python 3 installed:
 
 ```bash
+pnpm cli eval --suite development20  # all 20 fixed development tasks, both conditions
 pnpm cli eval --suite cvefixes --prepare
 pnpm cli eval --suite cvefixes
 ```
 
-The **Evidence** page at `/#/bench` shows all eight trials, including failures,
+The **Evidence** page at `/#/bench` shows all registered trials, including failures,
 with verdicts, candidate artifacts, source hashes, and Vouch agent traces. The
 registered model is `gpt-5.6-sol` for both conditions. This pilot compares source
 labels and published patch references; it does not run CVE reproduction or
 runtime regression tests.
+
+The [fixed development set](bench/development20/README.md) contains 20 distinct
+synthetic source tasks, including correct controls. Every run uses the same
+hash-pinned problems and grader. Harness and skill improvements can be evaluated
+on this set; the UI labels these as development-set tuning results, separately
+from the four-snapshot CVEfixes pilot.
 
 The repository workflows accept a local Git path or an anonymous public HTTPS GitHub URL
 in the form `https://github.com/owner/repo` (an optional `.git` suffix and trailing

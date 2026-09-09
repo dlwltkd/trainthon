@@ -3,7 +3,9 @@ export type SourceVerdict = "issue_present" | "issue_absent" | "uncertain";
 
 export interface EvaluationCase {
   id: string;
-  cve: string;
+  cve?: string;
+  title?: string;
+  sourcePath?: string;
   cwe: string;
   variant: "before" | "fixed";
   sourceUrl: string;
@@ -41,7 +43,9 @@ export interface SourceEvaluation {
   endedAt?: number;
   manifestHash: string;
   manifest: {
-    suite: "cvefixes-source-pilot-v1" | "cvefixes-source-pilot-v2" | "cvefixes-source-pilot-v3";
+    suite: "cvefixes-source-pilot-v1" | "cvefixes-source-pilot-v2" | "cvefixes-source-pilot-v3" | "defensive-development20-v1";
+    cohortSha256?: string;
+    maxConcurrentPairs?: number;
     datasetUrl: string;
     cohortUrl: string;
     selection: string;

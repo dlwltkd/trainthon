@@ -8,13 +8,13 @@ export interface SourceAnswer {
   edits?: Array<{ oldText: string; newText: string }>;
 }
 
-export function parseSourceAnswer(text: string): SourceAnswer {
+export function parseSourceAnswer(text: string, sourcePath = "bottle.py"): SourceAnswer {
   const raw = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const answer = JSON.parse(raw) as SourceAnswer;
   if (!answer || !["issue_present", "issue_absent", "uncertain"].includes(answer.verdict)
     || typeof answer.summary !== "string" || answer.summary.length > 12_000
     || !Array.isArray(answer.evidence) || answer.evidence.length > 20
-    || answer.evidence.some(item => !item || item.path !== "bottle.py" || typeof item.quote !== "string" || !item.quote.trim() || item.quote.length > 12_000)) {
+    || answer.evidence.some(item => !item || item.path !== sourcePath || typeof item.quote !== "string" || !item.quote.trim() || item.quote.length > 12_000)) {
     throw new Error("invalid structured source verdict");
   }
   return answer;
